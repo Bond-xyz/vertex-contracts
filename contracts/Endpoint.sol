@@ -156,21 +156,14 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         chargeFee(sender, fee, QUOTE_PRODUCT_ID);
     }
 
-    function chargeFee(
-        bytes32 sender,
-        int128 fee,
-        uint32 productId
-    ) internal {
+    function chargeFee(bytes32 sender, int128 fee, uint32 productId) internal {
         spotEngine.updateBalance(productId, sender, -fee);
         sequencerFee[productId] += fee;
     }
 
-    function getLinkedSigner(bytes32 subaccount)
-        public
-        view
-        virtual
-        returns (address)
-    {
+    function getLinkedSigner(
+        bytes32 subaccount
+    ) public view virtual returns (address) {
         // if (RiskHelper.isFrontendAccount(subaccount)) {
         //     return linkedSigners[RiskHelper.defaultFrontendAccount(subaccount)];
         // } else {
@@ -223,8 +216,14 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         address from,
         uint256 amount
     ) internal {
+        uint256 custodyBalanceBefore = token.balanceOf(address(clearinghouse));
         safeTransferFrom(token, from, amount);
         safeTransferTo(token, address(clearinghouse), amount);
+        require(
+            token.balanceOf(address(clearinghouse)) ==
+                custodyBalanceBefore + amount,
+            ERR_TRANSFER_FAILED
+        );
     }
 
     function validateSender(bytes32 txSender, address sender) internal view {
@@ -235,9 +234,10 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         );
     }
 
-    function setReferralCode(address sender, string memory referralCode)
-        internal
-    {
+    function setReferralCode(
+        address sender,
+        string memory referralCode
+    ) internal {
         if (bytes(referralCodes[sender]).length == 0) {
             referralCodes[sender] = referralCode;
         }
@@ -276,6 +276,7 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         uint128 amount,
         string memory referralCode
     ) public {
+        require(productId == QUOTE_PRODUCT_ID, ERR_INVALID_PRODUCT);
         require(bytes(referralCode).length != 0, ERR_INVALID_REFERRAL_CODE);
 
         address sender = address(bytes20(subaccount));
@@ -780,11 +781,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         verifier.revertGasInfo(transactions.length, gasUsed - gasleft());
     }
 
-    function getSubaccountId(bytes32 subaccount)
-        external
-        view
-        returns (uint64)
-    {
+    function getSubaccountId(
+        bytes32 subaccount
+    ) external view returns (uint64) {
         return subaccountIds[subaccount];
     }
 
@@ -793,11 +792,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return token;
     }
 
-    function getPriceX18(uint32 productId)
-        public
-        view
-        returns (int128 _priceX18)
-    {
+    function getPriceX18(
+        uint32 productId
+    ) public view returns (int128 _priceX18) {
         _priceX18 = priceX18[productId];
         require(_priceX18 != 0, ERR_INVALID_PRODUCT);
     }
@@ -821,15 +818,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return sequencer;
     }
 
-    function getSlowModeTx(uint64 idx)
-        external
-        view
-        returns (
-            SlowModeTx memory,
-            uint64,
-            uint64
-        )
-    {
+    function getSlowModeTx(
+        uint64 idx
+    ) external view returns (SlowModeTx memory, uint64, uint64) {
         return (
             slowModeTxs[idx],
             slowModeConfig.txUpTo,
@@ -841,10 +832,10 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return nonces[sender];
     }
 
-    function registerTransferableWallet(address wallet, bool _transferable)
-        external
-        onlyOwner
-    {
+    function registerTransferableWallet(
+        address wallet,
+        bool _transferable
+    ) external onlyOwner {
         transferableWallets[wallet] = true;
     }
 }

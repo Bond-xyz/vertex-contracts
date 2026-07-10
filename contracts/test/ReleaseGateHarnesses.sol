@@ -3,6 +3,20 @@ pragma solidity ^0.8.0;
 
 import "../OffchainExchange.sol";
 import "../interfaces/IEndpoint.sol";
+import "../util/MockERC20.sol";
+
+contract TransferTaxMockERC20 is MockERC20 {
+    constructor() MockERC20("Transfer Tax USD", "USDC.e", 6) {}
+
+    function _transfer(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) internal override {
+        super._transfer(sender, recipient, amount - 1);
+        _burn(sender, 1);
+    }
+}
 
 contract MockSpotEngineForEndpoint {
     address public immutable token;
@@ -29,14 +43,13 @@ contract MockClearinghouseForEndpoint {
         return quote;
     }
 
-    function getEngineByType(IProductEngine.EngineType engineType)
-        external
-        view
-        returns (address)
-    {
-        return engineType == IProductEngine.EngineType.SPOT
-            ? spotEngine
-            : address(0);
+    function getEngineByType(
+        IProductEngine.EngineType engineType
+    ) external view returns (address) {
+        return
+            engineType == IProductEngine.EngineType.SPOT
+                ? spotEngine
+                : address(0);
     }
 
     function getEngineByProduct(uint32) external pure returns (address) {

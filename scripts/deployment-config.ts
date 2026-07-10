@@ -2,6 +2,20 @@ import fs from 'fs';
 import path from 'path';
 import { BigNumber, utils } from 'ethers';
 
+export const GALILEO_CHAIN_ID = 16602;
+export const GALILEO_USDCE_ADDRESS = '0xF2506aa3684871549083d235453a1dcDcCB3396c';
+export const GALILEO_USDCE_SYMBOL = 'USDC.e';
+export const GALILEO_USDCE_DECIMALS = 6;
+
+export function requireGalileoUsdce(value?: string): string {
+  const canonical = utils.getAddress(GALILEO_USDCE_ADDRESS);
+  if (value === undefined || value.trim() === '') return canonical;
+  if (!utils.isAddress(value) || utils.getAddress(value) !== canonical) {
+    throw new Error(`Galileo collateral must be existing USDC.e ${canonical}; substitutes are forbidden`);
+  }
+  return canonical;
+}
+
 export type ProductConfig = {
   symbol: string;
   productId: number;
@@ -26,8 +40,7 @@ export type GalileoProducts = {
 
 export type VerifierPoint = { x: string; y: string };
 
-const readJson = <T>(file: string): T =>
-  JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as T;
+const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as T;
 
 const positive = (value: string, field: string): BigNumber => {
   const parsed = BigNumber.from(value);
@@ -37,11 +50,11 @@ const positive = (value: string, field: string): BigNumber => {
 
 export function loadProducts(file: string): GalileoProducts {
   const config = readJson<GalileoProducts>(file);
-  if (config.chainId !== 16602) throw new Error('product config chainId must be 16602');
+  if (config.chainId !== GALILEO_CHAIN_ID) {
+    throw new Error(`product config chainId must be ${GALILEO_CHAIN_ID}`);
+  }
   if (!config.approved) {
-    throw new Error(
-      'product risk/scaling config is not approved; do not weaken this release gate',
-    );
+    throw new Error('product risk/scaling config is not approved; do not weaken this release gate');
   }
   const expectedIds = [2, 4, 6, 8];
   const ids = config.products.map((product) => product.productId);
@@ -74,18 +87,14 @@ export function loadVerifierPoints(file: string): VerifierPoint[] {
     signerBitmask: number;
     keys: VerifierPoint[];
   }>(file);
-  if (config.chainId !== 16602 || config.signerBitmask !== 7) {
-    throw new Error('verifier public-key file must target chain 16602 and bitmask 7');
+  if (config.chainId !== GALILEO_CHAIN_ID || config.signerBitmask !== 7) {
+    throw new Error(`verifier public-key file must target chain ${GALILEO_CHAIN_ID} and bitmask 7`);
   }
   if (config.keys.length !== 3) {
     throw new Error('audited Endpoint hardcodes bitmask 7; exactly three verifier keys are required');
   }
   for (const [index, point] of config.keys.entries()) {
-    const publicKey = utils.hexConcat([
-      '0x04',
-      utils.hexZeroPad(point.x, 32),
-      utils.hexZeroPad(point.y, 32),
-    ]);
+    const publicKey = utils.hexConcat(['0x04', utils.hexZeroPad(point.x, 32), utils.hexZeroPad(point.y, 32)]);
     try {
       utils.computePublicKey(publicKey, false);
     } catch {

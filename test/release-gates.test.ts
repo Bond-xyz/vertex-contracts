@@ -3,21 +3,14 @@ import { ethers, upgrades } from 'hardhat';
 import { BigNumber, Contract, Wallet, utils } from 'ethers';
 import fs from 'fs';
 import path from 'path';
-import {
-  publicPoint,
-  signSchnorrForTest,
-  subaccountFor,
-} from './helpers/schnorr';
+import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
+import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
 
-const TEST_VERIFIER_KEYS = [
-  `0x${'11'.repeat(32)}`,
-  `0x${'22'.repeat(32)}`,
-  `0x${'33'.repeat(32)}`,
-];
+const TEST_VERIFIER_KEYS = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, `0x${'33'.repeat(32)}`];
 
 const zeroPoint = { x: BigNumber.from(0), y: BigNumber.from(0) };
 
-async function deployEndpointFixture(): Promise<{
+async function deployEndpointFixture(useTransferTaxToken?: boolean): Promise<{
   endpoint: Contract;
   token: Contract;
   clearinghouse: Contract;
@@ -25,17 +18,15 @@ async function deployEndpointFixture(): Promise<{
   user: any;
 }> {
   const [deployer, sequencer, user] = await ethers.getSigners();
-  const Token = await ethers.getContractFactory('MockERC20');
-  const token = await Token.deploy('Bond Test USD', 'USDC.e', 6);
+  const Token = await ethers.getContractFactory(useTransferTaxToken ? 'TransferTaxMockERC20' : 'MockERC20');
+  const token = useTransferTaxToken ? await Token.deploy() : await Token.deploy('Bond Test USD', 'USDC.e', 6);
   await token.deployed();
 
   const Spot = await ethers.getContractFactory('MockSpotEngineForEndpoint');
   const spot = await Spot.deploy(token.address);
   await spot.deployed();
 
-  const Clearinghouse = await ethers.getContractFactory(
-    'MockClearinghouseForEndpoint',
-  );
+  const Clearinghouse = await ethers.getContractFactory('MockClearinghouseForEndpoint');
   const clearinghouse = await Clearinghouse.deploy(token.address, spot.address);
   await clearinghouse.deployed();
 
@@ -47,14 +38,7 @@ async function deployEndpointFixture(): Promise<{
   const verifier = await Verifier.deploy();
   await verifier.deployed();
   const points = TEST_VERIFIER_KEYS.map(publicPoint);
-  await verifier.initialize([
-    ...points,
-    zeroPoint,
-    zeroPoint,
-    zeroPoint,
-    zeroPoint,
-    zeroPoint,
-  ]);
+  await verifier.initialize([...points, zeroPoint, zeroPoint, zeroPoint, zeroPoint, zeroPoint]);
 
   const Endpoint = await ethers.getContractFactory('Endpoint');
   const endpoint = await Endpoint.deploy();
@@ -65,7 +49,7 @@ async function deployEndpointFixture(): Promise<{
     ethers.constants.AddressZero,
     clearinghouse.address,
     verifier.address,
-    [utils.parseUnits('1', 18), 0, utils.parseUnits('100000', 18)],
+    [utils.parseUnits('1', 18), 0, utils.parseUnits('100000', 18)]
   );
 
   await token.transfer(user.address, 10_000_000);
@@ -73,9 +57,7 @@ async function deployEndpointFixture(): Promise<{
 }
 
 function signedBatchPayload(idx: number, transactions: string[]) {
-  let digest = utils.keccak256(
-    utils.defaultAbiCoder.encode(['uint64'], [idx]),
-  );
+  let digest = utils.keccak256(utils.defaultAbiCoder.encode(['uint64'], [idx]));
   for (const transaction of transactions) {
     digest = utils.keccak256(utils.solidityPack(['bytes32', 'bytes'], [digest, transaction]));
   }
@@ -83,68 +65,51 @@ function signedBatchPayload(idx: number, transactions: string[]) {
 }
 
 describe('Galileo audited-base release gates', () => {
+  it('pins the only accepted Galileo collateral address', () => {
+    expect(requireGalileoUsdce()).to.equal(GALILEO_USDCE_ADDRESS);
+    expect(requireGalileoUsdce(GALILEO_USDCE_ADDRESS.toLowerCase())).to.equal(GALILEO_USDCE_ADDRESS);
+    expect(() => requireGalileoUsdce(ethers.constants.AddressZero)).to.throw('substitutes are forbidden');
+  });
+
   it('keeps audited transaction ordinals and omits UpdatePerpBalance', async () => {
     const Harness = await ethers.getContractFactory('TransactionOrdinalHarness');
     const harness = await Harness.deploy();
     const ordinals = await harness.keyOrdinals();
-    expect(ordinals.map((value: BigNumber | number) => Number(value))).to.deep.equal([
-      1, 2, 4, 6, 15, 23, 24,
-    ]);
+    expect(ordinals.map((value: BigNumber | number) => Number(value))).to.deep.equal([1, 2, 4, 6, 15, 23, 24]);
 
-    const source = fs.readFileSync(
-      path.join(__dirname, '..', 'contracts', 'interfaces', 'IEndpoint.sol'),
-      'utf8',
-    );
+    const source = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'interfaces', 'IEndpoint.sol'), 'utf8');
     expect(source).not.to.contain('UpdatePerpBalance');
   });
 
   it('exposes only the quorum-signed batch ABI and enforces signer plus index', async () => {
     const { endpoint, sequencer } = await deployEndpointFixture();
-    expect(
-      endpoint.interface.functions[
-        'submitTransactionsChecked(uint64,bytes[],bytes32,bytes32)'
-      ],
-    ).not.to.equal(undefined);
-    expect(
-      endpoint.interface.functions['submitTransactionsChecked(uint64,bytes[])'],
-    ).to.equal(undefined);
+    expect(endpoint.interface.functions['submitTransactionsChecked(uint64,bytes[],bytes32,bytes32)']).not.to.equal(
+      undefined
+    );
+    expect(endpoint.interface.functions['submitTransactionsChecked(uint64,bytes[])']).to.equal(undefined);
 
     const updatePrice = utils.hexConcat([
       '0x04',
-      utils.defaultAbiCoder.encode(
-        ['tuple(uint32 productId,int128 priceX18)'],
-        [[2, utils.parseUnits('101000', 18)]],
-      ),
+      utils.defaultAbiCoder.encode(['tuple(uint32 productId,int128 priceX18)'], [[2, utils.parseUnits('101000', 18)]]),
     ]);
     const signed = signedBatchPayload(0, [updatePrice]);
 
+    await expect(endpoint.submitTransactionsChecked(0, [updatePrice], signed.e, signed.s)).to.be.reverted;
     await expect(
-      endpoint.submitTransactionsChecked(0, [updatePrice], signed.e, signed.s),
+      endpoint.connect(sequencer).submitTransactionsChecked(0, [updatePrice], ethers.constants.HashZero, signed.s)
     ).to.be.reverted;
-    await expect(
-      endpoint
-        .connect(sequencer)
-        .submitTransactionsChecked(0, [updatePrice], ethers.constants.HashZero, signed.s),
-    ).to.be.reverted;
-    await endpoint
-      .connect(sequencer)
-      .submitTransactionsChecked(0, [updatePrice], signed.e, signed.s);
+    await endpoint.connect(sequencer).submitTransactionsChecked(0, [updatePrice], signed.e, signed.s);
     expect(await endpoint.nSubmissions()).to.equal(1);
 
-    await expect(
-      endpoint
-        .connect(sequencer)
-        .submitTransactionsChecked(0, [updatePrice], signed.e, signed.s),
-    ).to.be.reverted;
+    await expect(endpoint.connect(sequencer).submitTransactionsChecked(0, [updatePrice], signed.e, signed.s)).to.be
+      .reverted;
   });
 
   it('rejects unsigned orders and accepts the wallet or linked signer', async () => {
     const [owner] = await ethers.getSigners();
     const Time = await ethers.getContractFactory('MockEndpointTime');
     const time = await Time.deploy(1);
-    const Exchange = await ethers.getContractFactory(
-      'OffchainExchangeReleaseHarness',
-    );
+    const Exchange = await ethers.getContractFactory('OffchainExchangeReleaseHarness');
     const exchange = await Exchange.deploy();
     await exchange.initializeForTest(time.address);
 
@@ -162,26 +127,14 @@ describe('Galileo audited-base release gates', () => {
     const walletSignature = utils.joinSignature(wallet._signingKey().signDigest(digest));
     const linkedSignature = utils.joinSignature(linked._signingKey().signDigest(digest));
     await expect(
-      exchange.validateOrderForTest(
-        { order, signature: '0x' },
-        digest,
-        ethers.constants.AddressZero,
-      ),
+      exchange.validateOrderForTest({ order, signature: '0x' }, digest, ethers.constants.AddressZero)
     ).to.be.revertedWith('ECDSA: invalid signature length');
     expect(
-      await exchange.validateOrderForTest(
-        { order, signature: walletSignature },
-        digest,
-        ethers.constants.AddressZero,
-      ),
+      await exchange.validateOrderForTest({ order, signature: walletSignature }, digest, ethers.constants.AddressZero)
     ).to.equal(true);
-    expect(
-      await exchange.validateOrderForTest(
-        { order, signature: linkedSignature },
-        digest,
-        linked.address,
-      ),
-    ).to.equal(true);
+    expect(await exchange.validateOrderForTest({ order, signature: linkedSignature }, digest, linked.address)).to.equal(
+      true
+    );
     expect(owner.address).not.to.equal(wallet.address);
   });
 
@@ -195,12 +148,7 @@ describe('Galileo audited-base release gates', () => {
     await expect(
       endpoint
         .connect(user)
-        ['depositCollateralWithReferral(bytes12,uint32,uint128,string)'](
-          subaccountName,
-          0,
-          amount,
-          'bond-testnet',
-        ),
+        ['depositCollateralWithReferral(bytes12,uint32,uint128,string)'](subaccountName, 0, amount, 'bond-testnet')
     )
       .to.emit(endpoint, 'DepositCollateralWithReferral')
       .withArgs(subaccount, 0, amount, 'bond-testnet');
@@ -212,12 +160,76 @@ describe('Galileo audited-base release gates', () => {
     expect(queued[2]).to.equal(1);
   });
 
+  it('rejects non-quote collateral and any inexact custody transfer', async () => {
+    const standard = await deployEndpointFixture();
+    const amount = 2_500_000;
+    const subaccountName = utils.hexZeroPad(utils.hexlify(7), 12);
+    await standard.token.connect(standard.user).approve(standard.endpoint.address, amount);
+    await expect(
+      standard.endpoint
+        .connect(standard.user)
+        ['depositCollateralWithReferral(bytes12,uint32,uint128,string)'](subaccountName, 1, amount, 'bond-testnet')
+    ).to.be.revertedWith('IP');
+    expect(await standard.token.balanceOf(standard.clearinghouse.address)).to.equal(0);
+
+    const taxed = await deployEndpointFixture(true);
+    const userBalanceBefore = await taxed.token.balanceOf(taxed.user.address);
+    await taxed.token.connect(taxed.user).approve(taxed.endpoint.address, amount);
+    await expect(
+      taxed.endpoint
+        .connect(taxed.user)
+        ['depositCollateralWithReferral(bytes12,uint32,uint128,string)'](subaccountName, 0, amount, 'bond-testnet')
+    ).to.be.revertedWith('TF');
+    expect(await taxed.token.balanceOf(taxed.user.address)).to.equal(userBalanceBefore);
+    expect(await taxed.token.balanceOf(taxed.clearinghouse.address)).to.equal(0);
+  });
+
+  it('prevents any post-deploy replacement of the product-zero token', async () => {
+    const [owner] = await ethers.getSigners();
+    const Token = await ethers.getContractFactory('MockERC20');
+    const quote = await Token.deploy('Bond Test USD', 'USDC.e', 6);
+    const substitute = await Token.deploy('Substitute USD', 'FAKE', 6);
+    const Spot = await ethers.getContractFactory('SpotEngine');
+    const spot = await Spot.deploy();
+    await spot.initialize(owner.address, owner.address, quote.address, owner.address, owner.address);
+
+    const encodeUpdate = (token: string) =>
+      utils.defaultAbiCoder.encode(
+        [
+          'tuple(uint32 productId,int128 sizeIncrement,int128 minSize,int128 lpSpreadX18,tuple(address token,int128 interestInflectionUtilX18,int128 interestFloorX18,int128 interestSmallCapX18,int128 interestLargeCapX18) config,tuple(int32 longWeightInitial,int32 shortWeightInitial,int32 longWeightMaintenance,int32 shortWeightMaintenance,int128 priceX18) riskStore)',
+        ],
+        [
+          {
+            productId: 0,
+            sizeIncrement: 0,
+            minSize: 0,
+            lpSpreadX18: 0,
+            config: {
+              token,
+              interestInflectionUtilX18: 0,
+              interestFloorX18: 0,
+              interestSmallCapX18: 0,
+              interestLargeCapX18: 0,
+            },
+            riskStore: {
+              longWeightInitial: 0,
+              shortWeightInitial: 0,
+              longWeightMaintenance: 0,
+              shortWeightMaintenance: 0,
+              priceX18: 0,
+            },
+          },
+        ]
+      );
+
+    await expect(spot.updateProduct(encodeUpdate(substitute.address))).to.be.revertedWith('BPC');
+    await spot.updateProduct(encodeUpdate(quote.address));
+    expect(await spot.getToken(0)).to.equal(quote.address);
+  });
+
   it('fresh-deploys and wires the full audited contract graph without old proxies', async () => {
-    const [deployer, sequencer] = await ethers.getSigners();
-    const deployShell = async (
-      name: string,
-      unsafeAllow: ('delegatecall')[] = [],
-    ) => {
+    const [deployer, sequencer, user] = await ethers.getSigners();
+    const deployShell = async (name: string, unsafeAllow: 'delegatecall'[] = []) => {
       const factory = await ethers.getContractFactory(name);
       const proxy = await upgrades.deployProxy(factory, [], {
         initializer: false,
@@ -230,6 +242,7 @@ describe('Galileo audited-base release gates', () => {
 
     const Token = await ethers.getContractFactory('MockERC20');
     const token = await Token.deploy('Bond Test USD', 'USDC.e', 6);
+    await token.transfer(user.address, 10_000_000);
     const Sanctions = await ethers.getContractFactory('MockSanctionsList');
     const sanctions = await Sanctions.deploy();
     const Liq = await ethers.getContractFactory('ClearinghouseLiq');
@@ -259,25 +272,18 @@ describe('Galileo audited-base release gates', () => {
       exchange.address,
       clearinghouse.address,
       verifier.address,
-      [utils.parseUnits('1', 18), 0, utils.parseUnits('100000', 18)],
+      [utils.parseUnits('1', 18), 0, utils.parseUnits('100000', 18)]
     );
 
     const Book = await ethers.getContractFactory('VirtualBook');
     const book = await Book.deploy(2);
-    await perp.addProduct(
-      2,
-      book.address,
-      utils.parseUnits('0.001', 18),
-      utils.parseUnits('0.001', 18),
-      0,
-      {
-        longWeightInitial: 950_000_000,
-        shortWeightInitial: 1_050_000_000,
-        longWeightMaintenance: 975_000_000,
-        shortWeightMaintenance: 1_025_000_000,
-        priceX18: utils.parseUnits('100000', 18),
-      },
-    );
+    await perp.addProduct(2, book.address, utils.parseUnits('0.001', 18), utils.parseUnits('0.001', 18), 0, {
+      longWeightInitial: 950_000_000,
+      shortWeightInitial: 1_050_000_000,
+      longWeightMaintenance: 975_000_000,
+      shortWeightMaintenance: 1_025_000_000,
+      priceX18: utils.parseUnits('100000', 18),
+    });
 
     expect(await endpoint.getSequencer()).to.equal(sequencer.address);
     expect(await clearinghouse.getEngineByType(0)).to.equal(spot.address);
@@ -285,5 +291,67 @@ describe('Galileo audited-base release gates', () => {
     expect(await exchange.getVirtualBook(2)).to.equal(book.address);
     expect(await perp.owner()).to.equal(deployer.address);
     expect(await endpoint.getVersion()).to.equal(27);
+
+    const depositAmount = 5_000_000;
+    const withdrawAmount = 1_000_000;
+    const subaccountName = utils.hexZeroPad(utils.hexlify(9), 12);
+    const subaccount = utils.hexConcat([user.address, subaccountName]);
+    await token.connect(user).approve(endpoint.address, depositAmount);
+    await endpoint
+      .connect(user)
+      ['depositCollateralWithReferral(bytes12,uint32,uint128,string)'](
+        subaccountName,
+        0,
+        depositAmount,
+        'bond-testnet'
+      );
+    expect(await token.balanceOf(clearinghouse.address)).to.equal(depositAmount);
+
+    const executeSlowMode = '0x08';
+    const executeSigned = signedBatchPayload(0, [executeSlowMode]);
+    await endpoint.connect(sequencer).submitTransactionsChecked(0, [executeSlowMode], executeSigned.e, executeSigned.s);
+    expect((await spot.getBalance(0, subaccount)).amount).to.equal(utils.parseUnits('5', 18));
+
+    const withdraw = {
+      sender: subaccount,
+      productId: 0,
+      amount: withdrawAmount,
+      nonce: 0,
+    };
+    const withdrawSignature = await user._signTypedData(
+      {
+        name: 'Vertex',
+        version: '0.0.1',
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        verifyingContract: endpoint.address,
+      },
+      {
+        WithdrawCollateral: [
+          { name: 'sender', type: 'bytes32' },
+          { name: 'productId', type: 'uint32' },
+          { name: 'amount', type: 'uint128' },
+          { name: 'nonce', type: 'uint64' },
+        ],
+      },
+      withdraw
+    );
+    const withdrawTransaction = utils.hexConcat([
+      '0x02',
+      utils.defaultAbiCoder.encode(
+        ['tuple(tuple(bytes32 sender,uint32 productId,uint128 amount,uint64 nonce) tx,bytes signature)'],
+        [{ tx: withdraw, signature: withdrawSignature }]
+      ),
+    ]);
+    const withdrawSigned = signedBatchPayload(1, [withdrawTransaction]);
+    await expect(
+      endpoint
+        .connect(sequencer)
+        .submitTransactionsChecked(1, [withdrawTransaction], withdrawSigned.e, withdrawSigned.s)
+    )
+      .to.emit(clearinghouse, 'ModifyCollateral')
+      .withArgs(utils.parseUnits('-1', 18), subaccount, 0);
+    expect(await token.balanceOf(clearinghouse.address)).to.equal(depositAmount - withdrawAmount);
+    expect(await token.balanceOf(user.address)).to.equal(6_000_000);
+    expect((await spot.getBalance(0, subaccount)).amount).to.equal(utils.parseUnits('3', 18));
   });
 });

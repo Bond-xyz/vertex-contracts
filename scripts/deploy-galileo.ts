@@ -4,15 +4,17 @@ import path from 'path';
 import { ethers, upgrades } from 'hardhat';
 import { Contract, ContractReceipt, utils } from 'ethers';
 import {
+  GALILEO_CHAIN_ID,
+  GALILEO_USDCE_ADDRESS,
+  GALILEO_USDCE_DECIMALS,
+  GALILEO_USDCE_SYMBOL,
   initialPrices,
   loadProducts,
   loadVerifierPoints,
+  requireGalileoUsdce,
 } from './deployment-config';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
-const CHAIN_ID = 16602;
-const DEFAULT_QUOTE = '0xF2506aa3684871549083d235453a1dcDcCB3396c';
-
 const requiredAddress = (value: string | undefined, field: string): string => {
   if (!value || !utils.isAddress(value)) throw new Error(`${field} must be an address`);
   return utils.getAddress(value);
@@ -23,13 +25,9 @@ const receipt = async (transaction: any): Promise<ContractReceipt> => transactio
 const deploymentBlock = async (contract: Contract): Promise<number> =>
   (await contract.deployTransaction.wait()).blockNumber;
 
-const sha256File = (file: string): string =>
-  crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const sha256File = (file: string): string => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
-async function deployProxyShell(
-  name: string,
-  unsafeAllow: ('delegatecall')[] = [],
-): Promise<Contract> {
+async function deployProxyShell(name: string, unsafeAllow: 'delegatecall'[] = []): Promise<Contract> {
   const factory = await ethers.getContractFactory(name);
   const proxy = await upgrades.deployProxy(factory, [], {
     initializer: false,
@@ -51,30 +49,21 @@ async function proxyRecord(contract: Contract) {
 
 async function main() {
   const network = await ethers.provider.getNetwork();
-  if (network.chainId !== CHAIN_ID) {
-    throw new Error(`refusing deployment: expected chain ${CHAIN_ID}, got ${network.chainId}`);
+  if (network.chainId !== GALILEO_CHAIN_ID) {
+    throw new Error(`refusing deployment: expected chain ${GALILEO_CHAIN_ID}, got ${network.chainId}`);
   }
 
   const [deployer] = await ethers.getSigners();
   const sequencer = requiredAddress(
     process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
-    'PERPDEX_SEQUENCER_ADDRESS',
+    'PERPDEX_SEQUENCER_ADDRESS'
   );
-  const quote = requiredAddress(
-    process.env.PERPDEX_QUOTE_TOKEN_ADDRESS || DEFAULT_QUOTE,
-    'PERPDEX_QUOTE_TOKEN_ADDRESS',
-  );
-  const productsFile = path.resolve(
-    process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json',
-  );
+  const quote = requireGalileoUsdce(process.env.PERPDEX_QUOTE_TOKEN_ADDRESS);
+  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
   const verifierFile = path.resolve(
-    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE ||
-      './config/galileo.verifier-public-keys.local.json',
+    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
   );
-  const manifestFile = path.resolve(
-    process.env.PERPDEX_DEPLOYMENT_MANIFEST ||
-      './deployments/16602/latest.local.json',
-  );
+  const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
 
   const products = loadProducts(productsFile);
   const verifierPoints = loadVerifierPoints(verifierFile);
@@ -82,11 +71,13 @@ async function main() {
   if (quoteCode === '0x') throw new Error('canonical quote token has no bytecode');
   const quoteContract = new Contract(
     quote,
-    ['function decimals() view returns (uint8)'],
-    ethers.provider,
+    ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'],
+    ethers.provider
   );
-  if ((await quoteContract.decimals()) !== 6) {
-    throw new Error('Galileo quote token must use six decimals');
+  const quoteDecimals = await quoteContract.decimals();
+  const quoteSymbol = await quoteContract.symbol();
+  if (quoteDecimals !== GALILEO_USDCE_DECIMALS || quoteSymbol !== GALILEO_USDCE_SYMBOL) {
+    throw new Error(`Galileo collateral metadata mismatch: expected ${GALILEO_USDCE_SYMBOL}/${GALILEO_USDCE_DECIMALS}`);
   }
 
   // Fresh proxies only. This script never upgrades or adopts the old Fable set.
@@ -105,25 +96,11 @@ async function main() {
   const perpEngine = await deployProxyShell('PerpEngine');
   const offchainExchange = await deployProxyShell('OffchainExchange');
 
-  const paddedVerifierPoints = [
-    ...verifierPoints,
-    ...Array(5).fill({ x: 0, y: 0 }),
-  ];
+  const paddedVerifierPoints = [...verifierPoints, ...Array(5).fill({ x: 0, y: 0 })];
   await receipt(await verifier.initialize(paddedVerifierPoints));
-  await receipt(
-    await clearinghouse.initialize(
-      endpoint.address,
-      quote,
-      clearinghouseLiq.address,
-      products.spreads,
-    ),
-  );
-  await receipt(
-    await clearinghouse.addEngine(spotEngine.address, offchainExchange.address, 0),
-  );
-  await receipt(
-    await clearinghouse.addEngine(perpEngine.address, offchainExchange.address, 1),
-  );
+  await receipt(await clearinghouse.initialize(endpoint.address, quote, clearinghouseLiq.address, products.spreads));
+  await receipt(await clearinghouse.addEngine(spotEngine.address, offchainExchange.address, 0));
+  await receipt(await clearinghouse.addEngine(perpEngine.address, offchainExchange.address, 1));
   await receipt(await offchainExchange.initialize(clearinghouse.address, endpoint.address));
   await receipt(
     await endpoint.initialize(
@@ -132,8 +109,8 @@ async function main() {
       offchainExchange.address,
       clearinghouse.address,
       verifier.address,
-      initialPrices(products.products),
-    ),
+      initialPrices(products.products)
+    )
   );
 
   const VirtualBook = await ethers.getContractFactory('VirtualBook');
@@ -154,8 +131,8 @@ async function main() {
           longWeightMaintenance: product.risk.longWeightMaintenance,
           shortWeightMaintenance: product.risk.shortWeightMaintenance,
           priceX18: product.risk.priceX18,
-        },
-      ),
+        }
+      )
     );
     const configuredBook = await offchainExchange.getVirtualBook(product.productId);
     if (configuredBook !== virtualBook.address) {
@@ -178,9 +155,7 @@ async function main() {
     throw new Error('perp engine product registration verification failed');
   }
   if (
-    !endpoint.interface.functions[
-      'submitTransactionsChecked(uint64,bytes[],bytes32,bytes32)'
-    ] ||
+    !endpoint.interface.functions['submitTransactionsChecked(uint64,bytes[],bytes32,bytes32)'] ||
     endpoint.interface.functions['submitTransactionsChecked(uint64,bytes[])']
   ) {
     throw new Error('unsafe batch ABI detected');
@@ -198,16 +173,25 @@ async function main() {
         'enforce OffchainExchange order signatures',
         'emit DepositCollateralWithReferral for Bond settlement provenance',
         'deploy unique non-custodial VirtualBook domains',
+        'pin product zero to existing Galileo USDC.e and require exact custody transfers',
       ],
     },
     network: {
       name: '0G Galileo Testnet',
-      chainId: CHAIN_ID,
+      chainId: GALILEO_CHAIN_ID,
     },
     deployer: deployer.address,
     sequencer,
     sequencerUsesDeployer: sequencer === deployer.address,
     quoteToken: quote,
+    collateral: {
+      address: GALILEO_USDCE_ADDRESS,
+      symbol: GALILEO_USDCE_SYMBOL,
+      decimals: GALILEO_USDCE_DECIMALS,
+      productId: 0,
+      source: 'existing',
+      deployToken: false,
+    },
     contracts: {
       sanctions: {
         address: sanctions.address,
@@ -231,6 +215,8 @@ async function main() {
       updatePerpBalanceAbsent: true,
       slowModeExitPreserved: true,
       productRiskConfigApproved: true,
+      exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
+      collateralTokenDeploymentAbsent: true,
     },
   };
 

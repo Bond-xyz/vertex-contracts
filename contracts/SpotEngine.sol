@@ -129,7 +129,12 @@ contract SpotEngine is SpotEngineLP, Version {
         UpdateProductTx memory txn = abi.decode(rawTxn, (UpdateProductTx));
         RiskHelper.RiskStore memory riskStore = txn.riskStore;
 
-        if (txn.productId != QUOTE_PRODUCT_ID) {
+        if (txn.productId == QUOTE_PRODUCT_ID) {
+            require(
+                txn.config.token == configs[QUOTE_PRODUCT_ID].token,
+                ERR_BAD_PRODUCT_CONFIG
+            );
+        } else {
             require(
                 riskStore.longWeightInitial <=
                     riskStore.longWeightMaintenance &&
@@ -161,10 +166,10 @@ contract SpotEngine is SpotEngineLP, Version {
         configs[txn.productId] = txn.config;
     }
 
-    function updateQuoteFromInsurance(bytes32 subaccount, int128 insurance)
-        external
-        returns (int128)
-    {
+    function updateQuoteFromInsurance(
+        bytes32 subaccount,
+        int128 insurance
+    ) external returns (int128) {
         _assertInternal();
         //        uint32 isoGroup = RiskHelper.isoGroup(subaccount);
         //        State memory state = _getQuoteState(isoGroup);

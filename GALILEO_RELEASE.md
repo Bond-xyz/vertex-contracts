@@ -8,10 +8,24 @@ This branch starts at audited Vertex V2 commit `6d5df597afe4eb16c6131a85f45322e0
 2. Re-enable `OffchainExchange` EIP-712 order-signature enforcement.
 3. Emit `DepositCollateralWithReferral`, which Bond settlement indexes for deposit provenance.
 4. Deploy one non-custodial `VirtualBook` marker per product to prevent cross-market signature replay.
+5. Pin product zero to the existing Galileo USDC.e and restrict collateral custody to exact quote-token transfers.
 
 The proxy deployment explicitly permits the audited `Clearinghouse` delegatecall to the pinned `ClearinghouseLiq` implementation; no other unsafe OpenZeppelin validation bypass is allowed.
 
 No unsigned batch overload and no `UpdatePerpBalance` transaction exist.
+
+## Galileo collateral gate
+
+The only collateral for this release is the existing 0G Galileo testnet USDC.e:
+
+- chain ID: `16602`
+- product ID: `0`
+- token: `0xF2506aa3684871549083d235453a1dcDcCB3396c`
+- symbol / decimals: `USDC.e` / `6`
+
+The deployer rejects any substitute address or token metadata and never deploys a collateral token. Product zero cannot be changed to a different token after initialization. User deposits and withdrawals are quote-only; a deposit is queued only after the clearinghouse custody balance increases by the exact transferred amount, and a withdrawal returns that same configured token.
+
+`DepositCollateralWithReferral` does not contain an on-chain deposit index. Its immutable event identity is `(transaction hash, log index)`; the settlement database may assign an internal `deposit_idx` only after the configured confirmation depth. Testnet-live acceptance must prove that identity maps to one slow-mode execution and one backend credit. Mock/admin credits and test-funding routes are not permitted release evidence.
 
 ## Release gate
 

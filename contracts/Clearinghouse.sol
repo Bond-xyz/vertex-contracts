@@ -77,19 +77,15 @@ contract Clearinghouse is
         return quote;
     }
 
-    function getEngineByType(IProductEngine.EngineType engineType)
-        external
-        view
-        returns (address)
-    {
+    function getEngineByType(
+        IProductEngine.EngineType engineType
+    ) external view returns (address) {
         return address(engineByType[engineType]);
     }
 
-    function getEngineByProduct(uint32 productId)
-        external
-        view
-        returns (address)
-    {
+    function getEngineByProduct(
+        uint32 productId
+    ) external view returns (address) {
         return address(productToEngine[productId]);
     }
 
@@ -98,11 +94,10 @@ contract Clearinghouse is
     }
 
     /// @notice grab total subaccount health
-    function getHealth(bytes32 subaccount, IProductEngine.HealthType healthType)
-        public
-        view
-        returns (int128 health)
-    {
+    function getHealth(
+        bytes32 subaccount,
+        IProductEngine.HealthType healthType
+    ) public view returns (int128 health) {
         ISpotEngine spotEngine = ISpotEngine(
             address(engineByType[IProductEngine.EngineType.SPOT])
         );
@@ -226,11 +221,10 @@ contract Clearinghouse is
         return token.decimals();
     }
 
-    function depositCollateral(IEndpoint.DepositCollateral calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function depositCollateral(
+        IEndpoint.DepositCollateral calldata txn
+    ) external virtual onlyEndpoint {
+        require(txn.productId == QUOTE_PRODUCT_ID, ERR_INVALID_PRODUCT);
         require(txn.amount <= INT128_MAX, ERR_CONVERSION_OVERFLOW);
         ISpotEngine spotEngine = ISpotEngine(
             address(engineByType[IProductEngine.EngineType.SPOT])
@@ -238,18 +232,16 @@ contract Clearinghouse is
         uint8 decimals = _decimals(txn.productId);
 
         require(decimals <= MAX_DECIMALS);
-        int256 multiplier = int256(10**(MAX_DECIMALS - decimals));
+        int256 multiplier = int256(10 ** (MAX_DECIMALS - decimals));
         int128 amountRealized = int128(txn.amount) * int128(multiplier);
 
         spotEngine.updateBalance(txn.productId, txn.sender, amountRealized);
         emit ModifyCollateral(amountRealized, txn.sender, txn.productId);
     }
 
-    function transferQuote(IEndpoint.TransferQuote calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function transferQuote(
+        IEndpoint.TransferQuote calldata txn
+    ) external virtual onlyEndpoint {
         require(txn.amount <= INT128_MAX, ERR_CONVERSION_OVERFLOW);
         int128 toTransfer = int128(txn.amount);
         ISpotEngine spotEngine = ISpotEngine(
@@ -269,14 +261,12 @@ contract Clearinghouse is
     }
 
     /// @notice control insurance balance, only callable by owner
-    function depositInsurance(IEndpoint.DepositInsurance calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function depositInsurance(
+        IEndpoint.DepositInsurance calldata txn
+    ) external virtual onlyEndpoint {
         require(txn.amount <= INT128_MAX, ERR_CONVERSION_OVERFLOW);
         int256 multiplier = int256(
-            10**(MAX_DECIMALS - _decimals(QUOTE_PRODUCT_ID))
+            10 ** (MAX_DECIMALS - _decimals(QUOTE_PRODUCT_ID))
         );
         int128 amount = int128(txn.amount) * int128(multiplier);
         insurance += amount;
@@ -300,6 +290,7 @@ contract Clearinghouse is
         uint128 amount,
         address sendTo
     ) external virtual onlyEndpoint {
+        require(productId == QUOTE_PRODUCT_ID, ERR_INVALID_PRODUCT);
         require(amount <= INT128_MAX, ERR_CONVERSION_OVERFLOW);
         ISpotEngine spotEngine = ISpotEngine(
             address(engineByType[IProductEngine.EngineType.SPOT])
@@ -313,7 +304,7 @@ contract Clearinghouse is
 
         handleWithdrawTransfer(token, sendTo, amount);
 
-        int256 multiplier = int256(10**(MAX_DECIMALS - _decimals(productId)));
+        int256 multiplier = int256(10 ** (MAX_DECIMALS - _decimals(productId)));
         int128 amountRealized = -int128(amount) * int128(multiplier);
         spotEngine.updateBalance(productId, sender, amountRealized);
         spotEngine.assertUtilization(productId);
@@ -327,11 +318,9 @@ contract Clearinghouse is
         emit ModifyCollateral(amountRealized, sender, productId);
     }
 
-    function mintLp(IEndpoint.MintLp calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function mintLp(
+        IEndpoint.MintLp calldata txn
+    ) external virtual onlyEndpoint {
         require(txn.productId != QUOTE_PRODUCT_ID);
         productToEngine[txn.productId].mintLp(
             txn.productId,
@@ -343,11 +332,9 @@ contract Clearinghouse is
         require(_isAboveInitial(txn.sender), ERR_SUBACCT_HEALTH);
     }
 
-    function burnLp(IEndpoint.BurnLp calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function burnLp(
+        IEndpoint.BurnLp calldata txn
+    ) external virtual onlyEndpoint {
         productToEngine[txn.productId].burnLp(
             txn.productId,
             txn.sender,
@@ -355,11 +342,9 @@ contract Clearinghouse is
         );
     }
 
-    function burnLpAndTransfer(IEndpoint.BurnLpAndTransfer calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function burnLpAndTransfer(
+        IEndpoint.BurnLpAndTransfer calldata txn
+    ) external virtual onlyEndpoint {
         ISpotEngine spotEngine = ISpotEngine(
             address(engineByType[IProductEngine.EngineType.SPOT])
         );
@@ -454,20 +439,16 @@ contract Clearinghouse is
         return getHealth(subaccount, IProductEngine.HealthType.INITIAL) >= 0;
     }
 
-    function _isUnderMaintenance(bytes32 subaccount)
-        internal
-        view
-        returns (bool)
-    {
+    function _isUnderMaintenance(
+        bytes32 subaccount
+    ) internal view returns (bool) {
         // Weighted maintenance health < 0
         return getHealth(subaccount, IProductEngine.HealthType.MAINTENANCE) < 0;
     }
 
-    function liquidateSubaccount(IEndpoint.LiquidateSubaccount calldata txn)
-        external
-        virtual
-        onlyEndpoint
-    {
+    function liquidateSubaccount(
+        IEndpoint.LiquidateSubaccount calldata txn
+    ) external virtual onlyEndpoint {
         bytes4 liquidateSubaccountSelector = bytes4(
             keccak256(
                 "liquidateSubaccountImpl((bytes32,bytes32,uint32,bool,int128,uint64))"
