@@ -1,22 +1,72 @@
 import fs from 'fs';
 import path from 'path';
+import { BigNumber } from 'ethers';
 import { artifacts, ethers } from 'hardhat';
 import {
   GALILEO_CHAIN_ID,
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
+  loadProducts,
+  loadVerifierPoints,
   requireGalileoUsdce,
 } from './deployment-config';
+import type { ProductConfig } from './deployment-config';
 import {
+  assertVerifierPublicKeysMatch,
   assertBuildEvidenceMatches,
   collectReleaseBuildEvidence,
   loadReviewedSourceEvidence,
+  normalizeVerifierPublicKeys,
   ReleaseBuildEvidence,
   repositoryRoot,
+  verifyActiveClearinghouseLiq,
+  verifyConfigFileSha256,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
+  verifyVerifierPublicKeys,
+  verifyVirtualBookProductId,
 } from './release-evidence';
+
+function sameNumberish(actual: unknown, expected: unknown): boolean {
+  try {
+    return BigNumber.from(actual).eq(BigNumber.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+type ManifestMarketConfig = {
+  productId: unknown;
+  sizeIncrementX18: unknown;
+  minSizeX18: unknown;
+  lpSpreadX18: unknown;
+  risk?: Record<string, unknown>;
+};
+
+function assertManifestMarketMatchesConfig(
+  symbol: string,
+  market: ManifestMarketConfig | undefined,
+  product: ProductConfig
+): void {
+  if (!market) throw new Error(`manifest market is missing for ${symbol}`);
+  for (const field of ['productId', 'sizeIncrementX18', 'minSizeX18', 'lpSpreadX18']) {
+    if (!sameNumberish(market[field], product[field])) {
+      throw new Error(`manifest market ${symbol}.${field} does not match reviewed product config`);
+    }
+  }
+  for (const field of [
+    'longWeightInitial',
+    'shortWeightInitial',
+    'longWeightMaintenance',
+    'shortWeightMaintenance',
+    'priceX18',
+  ]) {
+    if (!sameNumberish(market.risk?.[field], product.risk[field])) {
+      throw new Error(`manifest market ${symbol}.risk.${field} does not match reviewed product config`);
+    }
+  }
+}
 
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
@@ -39,6 +89,30 @@ async function main() {
     if (manifest.source.artifactRuntimeHashes?.[key] !== artifact.runtimeCodeHash) {
       throw new Error(`manifest runtime hash index mismatch for ${key}`);
     }
+  }
+  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
+  const verifierFile = path.resolve(
+    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
+  );
+  verifyConfigFileSha256(productsFile, manifest.source.productConfigSha256, 'product config');
+  verifyConfigFileSha256(verifierFile, manifest.source.verifierPublicKeysSha256, 'verifier public-key config');
+  const products = loadProducts(productsFile);
+  const verifierPublicKeys = normalizeVerifierPublicKeys([
+    ...loadVerifierPoints(verifierFile),
+    ...Array.from({ length: 5 }, () => ({ x: 0, y: 0 })),
+  ]);
+  assertVerifierPublicKeysMatch(
+    manifest.contracts.verifier.publicKeys,
+    verifierPublicKeys,
+    'manifest verifier public key'
+  );
+  const manifestSymbols = Object.keys(manifest.markets).sort();
+  const productSymbols = products.products.map((product) => product.symbol).sort();
+  if (JSON.stringify(manifestSymbols) !== JSON.stringify(productSymbols)) {
+    throw new Error('manifest markets do not exactly match the reviewed product config');
+  }
+  for (const product of products.products) {
+    assertManifestMarketMatchesConfig(product.symbol, manifest.markets[product.symbol], product);
   }
   const network = await ethers.provider.getNetwork();
   if (network.chainId !== GALILEO_CHAIN_ID || manifest.network.chainId !== GALILEO_CHAIN_ID) {
@@ -74,6 +148,12 @@ async function main() {
     }
   }
 
+  const endpoint = await ethers.getContractAt('Endpoint', manifest.contracts.endpoint.proxy);
+  const clearinghouse = await ethers.getContractAt('Clearinghouse', manifest.contracts.clearinghouse.proxy);
+  const exchange = await ethers.getContractAt('OffchainExchange', manifest.contracts.offchainExchange.proxy);
+  const spotEngine = await ethers.getContractAt('SpotEngine', manifest.contracts.spotEngine.proxy);
+  const verifier = await ethers.getContractAt('Verifier', manifest.contracts.verifier.proxy);
+
   await verifyRuntimeArtifact(
     ethers.provider,
     manifest.contracts.sanctions.address,
@@ -81,12 +161,11 @@ async function main() {
     'sanctions',
     manifest.contracts.sanctions.runtimeCodeHash
   );
-  await verifyRuntimeArtifact(
+  await verifyActiveClearinghouseLiq(
     ethers.provider,
-    manifest.contracts.clearinghouseLiq.address,
-    reviewedBuild.artifacts.clearinghouseLiq,
-    'clearinghouse liquidation implementation',
-    manifest.contracts.clearinghouseLiq.runtimeCodeHash
+    clearinghouse,
+    manifest.contracts.clearinghouseLiq,
+    reviewedBuild.artifacts.clearinghouseLiq
   );
   const proxyKeys = ['verifier', 'endpoint', 'clearinghouse', 'spotEngine', 'perpEngine', 'offchainExchange'] as const;
   for (const key of proxyKeys) {
@@ -103,6 +182,7 @@ async function main() {
       key
     );
   }
+  await verifyVerifierPublicKeys(verifier, manifest.contracts.verifier.publicKeys);
   for (const [symbol, market] of Object.entries(manifest.markets) as any[]) {
     if (market.artifactKey !== 'virtualBook') {
       throw new Error(`manifest virtual-book artifact key mismatch for ${symbol}`);
@@ -114,12 +194,9 @@ async function main() {
       `${symbol} virtual book`,
       market.runtimeCodeHash
     );
+    await verifyVirtualBookProductId(ethers.provider, market.virtualBook, market.productId, `${symbol} virtual book`);
   }
 
-  const endpoint = await ethers.getContractAt('Endpoint', manifest.contracts.endpoint.proxy);
-  const clearinghouse = await ethers.getContractAt('Clearinghouse', manifest.contracts.clearinghouse.proxy);
-  const exchange = await ethers.getContractAt('OffchainExchange', manifest.contracts.offchainExchange.proxy);
-  const spotEngine = await ethers.getContractAt('SpotEngine', manifest.contracts.spotEngine.proxy);
   const quoteContract = new ethers.Contract(
     collateral,
     ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'],

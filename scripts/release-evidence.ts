@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { BigNumber, providers, utils } from 'ethers';
+import { BigNumber, BigNumberish, Contract, providers, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
 
 export const EIP170_MAX_RUNTIME_BYTES = 24_576;
@@ -73,6 +73,21 @@ export type ProxyDeploymentEvidence = {
   adminRuntimeCodeHash: string;
 };
 
+export type RuntimeDeploymentEvidence = {
+  address: string;
+  runtimeCodeHash: string;
+};
+
+export type VerifierPublicKeyPoint = {
+  x: string;
+  y: string;
+};
+
+type VerifierPublicKeyPointLike = {
+  x: BigNumberish;
+  y: BigNumberish;
+};
+
 type ArtifactShape = {
   contractName: string;
   sourceName: string;
@@ -80,6 +95,80 @@ type ArtifactShape = {
 };
 
 const sha256Json = (value: unknown): string => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+export const sha256File = (file: string): string =>
+  crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+export function verifyConfigFileSha256(file: string, expected: string, label: string): string {
+  if (!/^[0-9a-f]{64}$/i.test(expected)) {
+    throw new Error(`${label} manifest SHA-256 is invalid`);
+  }
+  const actual = sha256File(file);
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(`${label} SHA-256 mismatch: expected ${expected}, got ${actual}`);
+  }
+  return actual;
+}
+
+function uint256Hex(value: BigNumberish, label: string): string {
+  let parsed: BigNumber;
+  try {
+    parsed = BigNumber.from(value);
+  } catch (error) {
+    throw new Error(`${label} is not a uint256: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (parsed.lt(0)) throw new Error(`${label} is not a uint256`);
+  try {
+    return utils.hexZeroPad(parsed.toHexString(), 32).toLowerCase();
+  } catch {
+    throw new Error(`${label} exceeds uint256`);
+  }
+}
+
+export function normalizeVerifierPublicKeys(points: VerifierPublicKeyPointLike[]): VerifierPublicKeyPoint[] {
+  if (!Array.isArray(points) || points.length !== 8) {
+    throw new Error(
+      `verifier public-key evidence must contain exactly eight points, got ${Array.isArray(points) ? points.length : 0}`
+    );
+  }
+  return points.map((point, index) => ({
+    x: uint256Hex(point.x, `verifier public key ${index}.x`),
+    y: uint256Hex(point.y, `verifier public key ${index}.y`),
+  }));
+}
+
+export function assertVerifierPublicKeysMatch(
+  actualPoints: VerifierPublicKeyPointLike[],
+  expectedPoints: VerifierPublicKeyPointLike[],
+  label = 'verifier public key'
+): void {
+  const actual = normalizeVerifierPublicKeys(actualPoints);
+  const expected = normalizeVerifierPublicKeys(expectedPoints);
+  for (let index = 0; index < 8; index += 1) {
+    if (actual[index].x !== expected[index].x || actual[index].y !== expected[index].y) {
+      throw new Error(`${label} slot ${index} mismatch`);
+    }
+  }
+}
+
+export async function readVerifierPublicKeys(verifier: Contract): Promise<VerifierPublicKeyPoint[]> {
+  const points = await Promise.all(
+    Array.from({ length: 8 }, async (_, index) => {
+      const point = await verifier.getPubkey(index);
+      return { x: point.x ?? point[0], y: point.y ?? point[1] };
+    })
+  );
+  return normalizeVerifierPublicKeys(points);
+}
+
+export async function verifyVerifierPublicKeys(
+  verifier: Contract,
+  expectedPoints: VerifierPublicKeyPointLike[]
+): Promise<VerifierPublicKeyPoint[]> {
+  const actual = await readVerifierPublicKeys(verifier);
+  assertVerifierPublicKeysMatch(actual, expectedPoints);
+  return actual;
+}
 
 export function runtimeByteLength(deployedBytecode: string): number {
   if (!utils.isHexString(deployedBytecode) || deployedBytecode === '0x') {
@@ -265,6 +354,45 @@ export async function verifyRuntimeArtifact(
   const reviewedTemplate = normalizedImmutableRuntime(code, artifact.immutableReferences);
   sameHash(runtimeCodeHash(reviewedTemplate), artifact.runtimeCodeHash, `${label} artifact`);
   return exactHash;
+}
+
+export async function verifyActiveClearinghouseLiq(
+  provider: providers.Provider,
+  clearinghouse: Contract,
+  record: RuntimeDeploymentEvidence,
+  artifact: ArtifactRuntimeEvidence
+): Promise<string> {
+  const active = utils.getAddress(await clearinghouse.getClearinghouseLiq());
+  const expected = utils.getAddress(record.address);
+  if (active !== expected) {
+    throw new Error(`active ClearinghouseLiq target mismatch: expected ${expected}, got ${active}`);
+  }
+  await verifyRuntimeArtifact(
+    provider,
+    active,
+    artifact,
+    'active clearinghouse liquidation implementation',
+    record.runtimeCodeHash
+  );
+  return active;
+}
+
+export async function verifyVirtualBookProductId(
+  provider: providers.Provider,
+  virtualBookAddress: string,
+  expectedProductId: BigNumberish,
+  label: string
+): Promise<void> {
+  const virtualBook = new Contract(
+    virtualBookAddress,
+    ['function productId() external view returns (uint32)'],
+    provider
+  );
+  const actual = BigNumber.from(await virtualBook.productId());
+  const expected = BigNumber.from(expectedProductId);
+  if (!actual.eq(expected)) {
+    throw new Error(`${label} productId mismatch: expected ${expected.toString()}, got ${actual.toString()}`);
+  }
 }
 
 export async function verifyProxyDeployment(

@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import { artifacts, ethers, upgrades } from 'hardhat';
 import { BigNumber, Contract, Wallet, utils } from 'ethers';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
 import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
@@ -11,14 +12,31 @@ import {
   ENDPOINT_RUNTIME_BUDGET_BYTES,
   EIP170_MAX_RUNTIME_BYTES,
   inspectProxyDeployment,
+  normalizeVerifierPublicKeys,
   RELEASE_ARTIFACTS,
+  sha256File,
+  verifyActiveClearinghouseLiq,
+  verifyConfigFileSha256,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
+  verifyVerifierPublicKeys,
+  verifyVirtualBookProductId,
 } from '../scripts/release-evidence';
 
 const TEST_VERIFIER_KEYS = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, `0x${'33'.repeat(32)}`];
 
 const zeroPoint = { x: BigNumber.from(0), y: BigNumber.from(0) };
+
+async function expectFailure(promise: Promise<unknown>, expectedMessage: string): Promise<void> {
+  let error: unknown;
+  try {
+    await promise;
+  } catch (caught) {
+    error = caught;
+  }
+  expect(error).to.be.instanceOf(Error);
+  expect((error as Error).message).to.contain(expectedMessage);
+}
 
 async function deployEndpointFixture(useTransferTaxToken?: boolean): Promise<{
   endpoint: Contract;
@@ -94,6 +112,28 @@ describe('Galileo audited-base release gates', () => {
     expect(build.artifacts.proxyAdmin.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
   });
 
+  it('recomputes product and verifier config hashes and rejects changed evidence', () => {
+    const productsFile = path.join(__dirname, '..', 'config', 'galileo.products.json');
+    const productsHash = sha256File(productsFile);
+    expect(verifyConfigFileSha256(productsFile, productsHash, 'product config')).to.equal(productsHash);
+    expect(() => verifyConfigFileSha256(productsFile, '00'.repeat(32), 'product config')).to.throw(
+      'product config SHA-256 mismatch'
+    );
+
+    const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'bond-verifier-config-'));
+    const verifierFile = path.join(tempDirectory, 'verifier-public-keys.json');
+    try {
+      fs.writeFileSync(verifierFile, JSON.stringify({ chainId: 16602, signerBitmask: 7, keys: [] }));
+      const verifierHash = sha256File(verifierFile);
+      expect(verifyConfigFileSha256(verifierFile, verifierHash, 'verifier public-key config')).to.equal(verifierHash);
+      expect(() => verifyConfigFileSha256(verifierFile, 'ff'.repeat(32), 'verifier public-key config')).to.throw(
+        'verifier public-key config SHA-256 mismatch'
+      );
+    } finally {
+      fs.rmSync(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('pins the only accepted Galileo collateral address', () => {
     expect(requireGalileoUsdce()).to.equal(GALILEO_USDCE_ADDRESS);
     expect(requireGalileoUsdce(GALILEO_USDCE_ADDRESS.toLowerCase())).to.equal(GALILEO_USDCE_ADDRESS);
@@ -108,6 +148,41 @@ describe('Galileo audited-base release gates', () => {
 
     const source = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'interfaces', 'IEndpoint.sol'), 'utf8');
     expect(source).not.to.contain('UpdatePerpBalance');
+  });
+
+  it('records all eight verifier slots and rejects wrong or mutated live keys', async () => {
+    const Verifier = await ethers.getContractFactory('Verifier');
+    const verifier = await Verifier.deploy();
+    await verifier.deployed();
+    const expected = normalizeVerifierPublicKeys([
+      ...TEST_VERIFIER_KEYS.map(publicPoint),
+      ...Array.from({ length: 5 }, () => zeroPoint),
+    ]);
+    await verifier.initialize(expected);
+
+    expect(await verifyVerifierPublicKeys(verifier, expected)).to.deep.equal(expected);
+    expect(expected).to.have.length(8);
+    for (const point of expected) {
+      expect(point.x).to.match(/^0x[0-9a-f]{64}$/);
+      expect(point.y).to.match(/^0x[0-9a-f]{64}$/);
+    }
+
+    const wrongExpected = expected.map((point) => ({ ...point }));
+    wrongExpected[1] = normalizeVerifierPublicKeys([
+      zeroPoint,
+      publicPoint(`0x${'44'.repeat(32)}`),
+      zeroPoint,
+      zeroPoint,
+      zeroPoint,
+      zeroPoint,
+      zeroPoint,
+      zeroPoint,
+    ])[1];
+    await expectFailure(verifyVerifierPublicKeys(verifier, wrongExpected), 'verifier public key slot 1 mismatch');
+
+    const mutated = publicPoint(`0x${'55'.repeat(32)}`);
+    await verifier.assignPubKey(7, mutated.x, mutated.y);
+    await expectFailure(verifyVerifierPublicKeys(verifier, expected), 'verifier public key slot 7 mismatch');
   });
 
   it('exposes only the quorum-signed batch ABI and enforces signer plus index', async () => {
@@ -256,6 +331,48 @@ describe('Galileo audited-base release gates', () => {
     expect(await spot.getToken(0)).to.equal(quote.address);
   });
 
+  it('rejects a Clearinghouse whose active liquidation target differs from the manifest', async () => {
+    const [owner] = await ethers.getSigners();
+    const Liq = await ethers.getContractFactory('ClearinghouseLiq');
+    const manifestLiq = await Liq.deploy();
+    const wrongActiveLiq = await Liq.deploy();
+    await manifestLiq.deployed();
+    await wrongActiveLiq.deployed();
+    const Clearinghouse = await ethers.getContractFactory('Clearinghouse');
+    const clearinghouse = await Clearinghouse.deploy();
+    await clearinghouse.deployed();
+    await clearinghouse.initialize(owner.address, owner.address, wrongActiveLiq.address, 0);
+
+    const build = await collectReleaseBuildEvidence(artifacts);
+    const manifestRuntimeCodeHash = await verifyRuntimeArtifact(
+      ethers.provider,
+      manifestLiq.address,
+      build.artifacts.clearinghouseLiq,
+      'manifest liquidation implementation'
+    );
+    await expectFailure(
+      verifyActiveClearinghouseLiq(
+        ethers.provider,
+        clearinghouse,
+        { address: manifestLiq.address, runtimeCodeHash: manifestRuntimeCodeHash },
+        build.artifacts.clearinghouseLiq
+      ),
+      'active ClearinghouseLiq target mismatch'
+    );
+  });
+
+  it('binds each VirtualBook runtime to its manifest product ID', async () => {
+    const Book = await ethers.getContractFactory('VirtualBook');
+    const book = await Book.deploy(2);
+    await book.deployed();
+
+    await verifyVirtualBookProductId(ethers.provider, book.address, 2, 'BTC virtual book');
+    await expectFailure(
+      verifyVirtualBookProductId(ethers.provider, book.address, 4, 'BTC virtual book'),
+      'BTC virtual book productId mismatch'
+    );
+  });
+
   it('fresh-deploys and wires the full audited contract graph without old proxies', async () => {
     const [deployer, sequencer, user] = await ethers.getSigners();
     const deployShell = async (name: string, unsafeAllow: 'delegatecall'[] = []) => {
@@ -305,7 +422,7 @@ describe('Galileo audited-base release gates', () => {
       );
     }
 
-    await verifier.initialize([
+    const verifierPublicKeys = normalizeVerifierPublicKeys([
       ...TEST_VERIFIER_KEYS.map(publicPoint),
       zeroPoint,
       zeroPoint,
@@ -313,7 +430,21 @@ describe('Galileo audited-base release gates', () => {
       zeroPoint,
       zeroPoint,
     ]);
+    await verifier.initialize(verifierPublicKeys);
+    await verifyVerifierPublicKeys(verifier, verifierPublicKeys);
     await clearinghouse.initialize(endpoint.address, token.address, liq.address, 0);
+    const clearinghouseLiqRuntimeCodeHash = await verifyRuntimeArtifact(
+      ethers.provider,
+      liq.address,
+      build.artifacts.clearinghouseLiq,
+      'clearinghouse liquidation implementation'
+    );
+    await verifyActiveClearinghouseLiq(
+      ethers.provider,
+      clearinghouse,
+      { address: liq.address, runtimeCodeHash: clearinghouseLiqRuntimeCodeHash },
+      build.artifacts.clearinghouseLiq
+    );
     await clearinghouse.addEngine(spot.address, exchange.address, 0);
     await clearinghouse.addEngine(perp.address, exchange.address, 1);
     await exchange.initialize(clearinghouse.address, endpoint.address);
@@ -328,6 +459,7 @@ describe('Galileo audited-base release gates', () => {
 
     const Book = await ethers.getContractFactory('VirtualBook');
     const book = await Book.deploy(2);
+    await verifyVirtualBookProductId(ethers.provider, book.address, 2, 'BTC virtual book');
     const virtualBookRuntimeHash = await verifyRuntimeArtifact(
       ethers.provider,
       book.address,

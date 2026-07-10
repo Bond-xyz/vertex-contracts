@@ -20,18 +20,18 @@ The only collateral for this release is the existing 0G Galileo testnet USDC.e:
 
 - chain ID: `16602`
 - product ID: `0`
-- token: `0xF2506aa3684871549083d235453a1dcDcCB3396c`
+- token: `0xF2506aa3684871549083d235453a1dcDcCB3396c` <!-- gitleaks:allow -- public ERC-20 address -->
 - symbol / decimals: `USDC.e` / `6`
 
 The deployer rejects any substitute address or token metadata and never deploys a collateral token. Product zero cannot be changed to a different token after initialization. User deposits and withdrawals are quote-only; a deposit is queued only after the clearinghouse custody balance increases by the exact transferred amount, and a withdrawal returns that same configured token.
 
-`DepositCollateralWithReferral` does not contain an on-chain deposit index. Its immutable event identity is `(transaction hash, log index)`; the settlement database may assign an internal `deposit_idx` only after the configured confirmation depth. Testnet-live acceptance must prove that identity maps to one slow-mode execution and one backend credit. Mock/admin credits and test-funding routes are not permitted release evidence.
+`DepositCollateralWithReferral` does not contain an on-chain deposit index. Its immutable event identity is `(chain ID, Endpoint address, transaction hash, log index)`; the settlement database may assign an internal `deposit_idx` only after the configured confirmation depth. Testnet-live acceptance must prove that identity maps to one slow-mode execution and one backend credit. Mock/admin credits and test-funding routes are not permitted release evidence.
 
 ## Reviewed build provenance gate
 
 Deployment requires a clean checkout plus reviewer-pinned `PERPDEX_REVIEWED_RELEASE_COMMIT` and `PERPDEX_REVIEWED_SOURCE_TREE`. Obtain the two values with `git rev-parse HEAD` and `git rev-parse HEAD^{tree}` only after review, then copy them into the ignored local environment file. The deployment manifest records those values, the exact solc version and settings, and every reviewed artifact runtime hash.
 
-Post-deploy verification re-derives the clean Git and artifact evidence, reads each transparent proxy's EIP-1967 implementation and admin slots, and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. CI also rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
+Post-deploy verification re-derives the clean Git and artifact evidence, recomputes the product and verifier-public-key file hashes, reads each transparent proxy's EIP-1967 implementation and admin slots, and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. It also verifies the Clearinghouse's active liquidation delegate target and runtime, all eight live Verifier public-key slots including zero padding, and each VirtualBook's immutable product ID. CI rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
 
 ## Release gate
 

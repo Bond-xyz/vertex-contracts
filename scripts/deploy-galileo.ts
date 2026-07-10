@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { artifacts, ethers, upgrades } from 'hardhat';
@@ -18,11 +17,17 @@ import {
   collectReleaseBuildEvidence,
   inspectProxyDeployment,
   loadReviewedSourceEvidence,
+  normalizeVerifierPublicKeys,
   ReleaseArtifactKey,
   ReleaseBuildEvidence,
   repositoryRoot,
+  sha256File,
+  verifyActiveClearinghouseLiq,
+  verifyConfigFileSha256,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
+  verifyVerifierPublicKeys,
+  verifyVirtualBookProductId,
 } from './release-evidence';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
@@ -35,8 +40,6 @@ const receipt = async (transaction: any): Promise<ContractReceipt> => transactio
 
 const deploymentBlock = async (contract: Contract): Promise<number> =>
   (await contract.deployTransaction.wait()).blockNumber;
-
-const sha256File = (file: string): string => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 async function deployProxyShell(name: string, unsafeAllow: 'delegatecall'[] = []): Promise<Contract> {
   const factory = await ethers.getContractFactory(name);
@@ -100,8 +103,12 @@ async function main() {
   );
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
 
+  const productConfigSha256 = sha256File(productsFile);
+  const verifierPublicKeysSha256 = sha256File(verifierFile);
   const products = loadProducts(productsFile);
   const verifierPoints = loadVerifierPoints(verifierFile);
+  verifyConfigFileSha256(productsFile, productConfigSha256, 'product config');
+  verifyConfigFileSha256(verifierFile, verifierPublicKeysSha256, 'verifier public-key config');
   const quoteCode = await ethers.provider.getCode(quote);
   if (quoteCode === '0x') throw new Error('canonical quote token has no bytecode');
   const quoteContract = new Contract(
@@ -131,8 +138,12 @@ async function main() {
   const perpEngine = await deployProxyShell('PerpEngine');
   const offchainExchange = await deployProxyShell('OffchainExchange');
 
-  const paddedVerifierPoints = [...verifierPoints, ...Array(5).fill({ x: 0, y: 0 })];
+  const paddedVerifierPoints = normalizeVerifierPublicKeys([
+    ...verifierPoints,
+    ...Array.from({ length: 5 }, () => ({ x: 0, y: 0 })),
+  ]);
   await receipt(await verifier.initialize(paddedVerifierPoints));
+  await verifyVerifierPublicKeys(verifier, paddedVerifierPoints);
   await receipt(await clearinghouse.initialize(endpoint.address, quote, clearinghouseLiq.address, products.spreads));
   await receipt(await clearinghouse.addEngine(spotEngine.address, offchainExchange.address, 0));
   await receipt(await clearinghouse.addEngine(perpEngine.address, offchainExchange.address, 1));
@@ -153,6 +164,12 @@ async function main() {
   for (const product of products.products) {
     const virtualBook = await VirtualBook.deploy(product.productId);
     await virtualBook.deployed();
+    await verifyVirtualBookProductId(
+      ethers.provider,
+      virtualBook.address,
+      product.productId,
+      `${product.symbol} virtual book`
+    );
     await receipt(
       await perpEngine.addProduct(
         product.productId,
@@ -187,6 +204,7 @@ async function main() {
       virtualBookDeploymentBlock: await deploymentBlock(virtualBook),
       sizeIncrementX18: product.sizeIncrementX18,
       minSizeX18: product.minSizeX18,
+      lpSpreadX18: product.lpSpreadX18,
       risk: product.risk,
     };
   }
@@ -204,6 +222,30 @@ async function main() {
     throw new Error('unsafe batch ABI detected');
   }
 
+  const sanctionsRecord = await runtimeRecord(sanctions, 'sanctions', reviewedBuild.artifacts.sanctions);
+  const clearinghouseLiqRecord = await runtimeRecord(
+    clearinghouseLiq,
+    'clearinghouseLiq',
+    reviewedBuild.artifacts.clearinghouseLiq
+  );
+  await verifyActiveClearinghouseLiq(
+    ethers.provider,
+    clearinghouse,
+    clearinghouseLiqRecord,
+    reviewedBuild.artifacts.clearinghouseLiq
+  );
+  const verifierRecord = {
+    ...(await proxyRecord(verifier, 'verifier', reviewedBuild)),
+    publicKeys: paddedVerifierPoints,
+  };
+  const endpointRecord = await proxyRecord(endpoint, 'endpoint', reviewedBuild);
+  const clearinghouseRecord = await proxyRecord(clearinghouse, 'clearinghouse', reviewedBuild);
+  const spotEngineRecord = await proxyRecord(spotEngine, 'spotEngine', reviewedBuild);
+  const perpEngineRecord = await proxyRecord(perpEngine, 'perpEngine', reviewedBuild);
+  const offchainExchangeRecord = await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild);
+  verifyConfigFileSha256(productsFile, productConfigSha256, 'product config');
+  verifyConfigFileSha256(verifierFile, verifierPublicKeysSha256, 'verifier public-key config');
+
   const manifest = {
     schemaVersion: 2,
     release: 'bond-perpdex-galileo-audited-base',
@@ -216,8 +258,8 @@ async function main() {
       artifactRuntimeHashes: Object.fromEntries(
         Object.entries(reviewedBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
       ),
-      productConfigSha256: sha256File(productsFile),
-      verifierPublicKeysSha256: sha256File(verifierFile),
+      productConfigSha256,
+      verifierPublicKeysSha256,
       explicitDeltas: [
         'restore omitted Version.sol implementation',
         'enforce OffchainExchange order signatures',
@@ -243,18 +285,14 @@ async function main() {
       deployToken: false,
     },
     contracts: {
-      sanctions: {
-        ...(await runtimeRecord(sanctions, 'sanctions', reviewedBuild.artifacts.sanctions)),
-      },
-      clearinghouseLiq: {
-        ...(await runtimeRecord(clearinghouseLiq, 'clearinghouseLiq', reviewedBuild.artifacts.clearinghouseLiq)),
-      },
-      verifier: await proxyRecord(verifier, 'verifier', reviewedBuild),
-      endpoint: await proxyRecord(endpoint, 'endpoint', reviewedBuild),
-      clearinghouse: await proxyRecord(clearinghouse, 'clearinghouse', reviewedBuild),
-      spotEngine: await proxyRecord(spotEngine, 'spotEngine', reviewedBuild),
-      perpEngine: await proxyRecord(perpEngine, 'perpEngine', reviewedBuild),
-      offchainExchange: await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild),
+      sanctions: sanctionsRecord,
+      clearinghouseLiq: clearinghouseLiqRecord,
+      verifier: verifierRecord,
+      endpoint: endpointRecord,
+      clearinghouse: clearinghouseRecord,
+      spotEngine: spotEngineRecord,
+      perpEngine: perpEngineRecord,
+      offchainExchange: offchainExchangeRecord,
     },
     markets,
     gates: {
