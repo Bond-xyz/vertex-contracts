@@ -27,6 +27,12 @@ The deployer rejects any substitute address or token metadata and never deploys 
 
 `DepositCollateralWithReferral` does not contain an on-chain deposit index. Its immutable event identity is `(transaction hash, log index)`; the settlement database may assign an internal `deposit_idx` only after the configured confirmation depth. Testnet-live acceptance must prove that identity maps to one slow-mode execution and one backend credit. Mock/admin credits and test-funding routes are not permitted release evidence.
 
+## Reviewed build provenance gate
+
+Deployment requires a clean checkout plus reviewer-pinned `PERPDEX_REVIEWED_RELEASE_COMMIT` and `PERPDEX_REVIEWED_SOURCE_TREE`. Obtain the two values with `git rev-parse HEAD` and `git rev-parse HEAD^{tree}` only after review, then copy them into the ignored local environment file. The deployment manifest records those values, the exact solc version and settings, and every reviewed artifact runtime hash.
+
+Post-deploy verification re-derives the clean Git and artifact evidence, reads each transparent proxy's EIP-1967 implementation and admin slots, and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. CI also rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
+
 ## Release gate
 
 ```bash

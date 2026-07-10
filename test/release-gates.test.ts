@@ -1,10 +1,20 @@
 import { expect } from 'chai';
-import { ethers, upgrades } from 'hardhat';
+import { artifacts, ethers, upgrades } from 'hardhat';
 import { BigNumber, Contract, Wallet, utils } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
 import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
+import {
+  assertRuntimeSizeBudget,
+  collectReleaseBuildEvidence,
+  ENDPOINT_RUNTIME_BUDGET_BYTES,
+  EIP170_MAX_RUNTIME_BYTES,
+  inspectProxyDeployment,
+  RELEASE_ARTIFACTS,
+  verifyProxyDeployment,
+  verifyRuntimeArtifact,
+} from '../scripts/release-evidence';
 
 const TEST_VERIFIER_KEYS = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, `0x${'33'.repeat(32)}`];
 
@@ -65,6 +75,25 @@ function signedBatchPayload(idx: number, transactions: string[]) {
 }
 
 describe('Galileo audited-base release gates', () => {
+  it('records reviewed compiler/runtime hashes and enforces the Endpoint size budget', async () => {
+    const build = await collectReleaseBuildEvidence(artifacts);
+    expect(build.compiler.solcVersion).to.equal('0.8.13');
+    expect(build.compiler.settingsSha256).to.match(/^[0-9a-f]{64}$/);
+    expect(build.artifacts.endpoint.fullyQualifiedName).to.equal(RELEASE_ARTIFACTS.endpoint);
+    expect(build.artifacts.endpoint.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
+    expect(build.artifacts.endpoint.runtimeByteLength).to.be.lessThan(ENDPOINT_RUNTIME_BUDGET_BYTES);
+    expect(ENDPOINT_RUNTIME_BUDGET_BYTES).to.be.lessThan(EIP170_MAX_RUNTIME_BYTES);
+    expect(() =>
+      assertRuntimeSizeBudget(
+        'oversized endpoint fixture',
+        `0x${'00'.repeat(ENDPOINT_RUNTIME_BUDGET_BYTES)}`,
+        ENDPOINT_RUNTIME_BUDGET_BYTES
+      )
+    ).to.throw('hard budget');
+    expect(build.artifacts.transparentUpgradeableProxy.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
+    expect(build.artifacts.proxyAdmin.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
+  });
+
   it('pins the only accepted Galileo collateral address', () => {
     expect(requireGalileoUsdce()).to.equal(GALILEO_USDCE_ADDRESS);
     expect(requireGalileoUsdce(GALILEO_USDCE_ADDRESS.toLowerCase())).to.equal(GALILEO_USDCE_ADDRESS);
@@ -254,6 +283,28 @@ describe('Galileo audited-base release gates', () => {
     const perp = await deployShell('PerpEngine');
     const exchange = await deployShell('OffchainExchange');
 
+    const build = await collectReleaseBuildEvidence(artifacts);
+    for (const [key, contract] of [
+      ['verifier', verifier],
+      ['endpoint', endpoint],
+      ['clearinghouse', clearinghouse],
+      ['spotEngine', spot],
+      ['perpEngine', perp],
+      ['offchainExchange', exchange],
+    ] as const) {
+      const inspected = await inspectProxyDeployment(ethers.provider, contract.address);
+      expect(inspected.implementation).to.equal(await upgrades.erc1967.getImplementationAddress(contract.address));
+      expect(inspected.admin).to.equal(await upgrades.erc1967.getAdminAddress(contract.address));
+      await verifyProxyDeployment(
+        ethers.provider,
+        inspected,
+        build.artifacts[key],
+        build.artifacts.transparentUpgradeableProxy,
+        build.artifacts.proxyAdmin,
+        key
+      );
+    }
+
     await verifier.initialize([
       ...TEST_VERIFIER_KEYS.map(publicPoint),
       zeroPoint,
@@ -277,6 +328,20 @@ describe('Galileo audited-base release gates', () => {
 
     const Book = await ethers.getContractFactory('VirtualBook');
     const book = await Book.deploy(2);
+    const virtualBookRuntimeHash = await verifyRuntimeArtifact(
+      ethers.provider,
+      book.address,
+      build.artifacts.virtualBook,
+      'BTC virtual book'
+    );
+    expect(build.artifacts.virtualBook.immutableReferences).to.have.length(1);
+    await verifyRuntimeArtifact(
+      ethers.provider,
+      book.address,
+      build.artifacts.virtualBook,
+      'BTC virtual book',
+      virtualBookRuntimeHash
+    );
     await perp.addProduct(2, book.address, utils.parseUnits('0.001', 18), utils.parseUnits('0.001', 18), 0, {
       longWeightInitial: 950_000_000,
       shortWeightInitial: 1_050_000_000,

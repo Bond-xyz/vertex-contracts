@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ethers } from 'hardhat';
+import { artifacts, ethers } from 'hardhat';
 import {
   GALILEO_CHAIN_ID,
   GALILEO_USDCE_ADDRESS,
@@ -8,10 +8,38 @@ import {
   GALILEO_USDCE_SYMBOL,
   requireGalileoUsdce,
 } from './deployment-config';
+import {
+  assertBuildEvidenceMatches,
+  collectReleaseBuildEvidence,
+  loadReviewedSourceEvidence,
+  ReleaseBuildEvidence,
+  repositoryRoot,
+  verifyProxyDeployment,
+  verifyRuntimeArtifact,
+} from './release-evidence';
 
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  if (manifest.schemaVersion !== 2) {
+    throw new Error('deployment manifest must use provenance schema version 2');
+  }
+  loadReviewedSourceEvidence(
+    repositoryRoot(),
+    manifest.source.reviewedReleaseCommit,
+    manifest.source.reviewedSourceTree
+  );
+  const reviewedBuild = await collectReleaseBuildEvidence(artifacts);
+  const recordedBuild: ReleaseBuildEvidence = {
+    compiler: manifest.source.compiler,
+    artifacts: manifest.source.artifacts,
+  };
+  assertBuildEvidenceMatches(recordedBuild, reviewedBuild);
+  for (const [key, artifact] of Object.entries(reviewedBuild.artifacts)) {
+    if (manifest.source.artifactRuntimeHashes?.[key] !== artifact.runtimeCodeHash) {
+      throw new Error(`manifest runtime hash index mismatch for ${key}`);
+    }
+  }
   const network = await ethers.provider.getNetwork();
   if (network.chainId !== GALILEO_CHAIN_ID || manifest.network.chainId !== GALILEO_CHAIN_ID) {
     throw new Error('manifest/network chain mismatch');
@@ -44,6 +72,48 @@ async function main() {
     if ((await ethers.provider.getCode(address)) === '0x') {
       throw new Error(`missing bytecode at ${address}`);
     }
+  }
+
+  await verifyRuntimeArtifact(
+    ethers.provider,
+    manifest.contracts.sanctions.address,
+    reviewedBuild.artifacts.sanctions,
+    'sanctions',
+    manifest.contracts.sanctions.runtimeCodeHash
+  );
+  await verifyRuntimeArtifact(
+    ethers.provider,
+    manifest.contracts.clearinghouseLiq.address,
+    reviewedBuild.artifacts.clearinghouseLiq,
+    'clearinghouse liquidation implementation',
+    manifest.contracts.clearinghouseLiq.runtimeCodeHash
+  );
+  const proxyKeys = ['verifier', 'endpoint', 'clearinghouse', 'spotEngine', 'perpEngine', 'offchainExchange'] as const;
+  for (const key of proxyKeys) {
+    const record = manifest.contracts[key];
+    if (record.artifactKey !== key) {
+      throw new Error(`manifest artifact key mismatch for ${key}`);
+    }
+    await verifyProxyDeployment(
+      ethers.provider,
+      record,
+      reviewedBuild.artifacts[key],
+      reviewedBuild.artifacts.transparentUpgradeableProxy,
+      reviewedBuild.artifacts.proxyAdmin,
+      key
+    );
+  }
+  for (const [symbol, market] of Object.entries(manifest.markets) as any[]) {
+    if (market.artifactKey !== 'virtualBook') {
+      throw new Error(`manifest virtual-book artifact key mismatch for ${symbol}`);
+    }
+    await verifyRuntimeArtifact(
+      ethers.provider,
+      market.virtualBook,
+      reviewedBuild.artifacts.virtualBook,
+      `${symbol} virtual book`,
+      market.runtimeCodeHash
+    );
   }
 
   const endpoint = await ethers.getContractAt('Endpoint', manifest.contracts.endpoint.proxy);

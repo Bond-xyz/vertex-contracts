@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { ethers, upgrades } from 'hardhat';
+import { artifacts, ethers, upgrades } from 'hardhat';
 import { Contract, ContractReceipt, utils } from 'ethers';
 import {
   GALILEO_CHAIN_ID,
@@ -13,6 +13,17 @@ import {
   loadVerifierPoints,
   requireGalileoUsdce,
 } from './deployment-config';
+import {
+  ArtifactRuntimeEvidence,
+  collectReleaseBuildEvidence,
+  inspectProxyDeployment,
+  loadReviewedSourceEvidence,
+  ReleaseArtifactKey,
+  ReleaseBuildEvidence,
+  repositoryRoot,
+  verifyProxyDeployment,
+  verifyRuntimeArtifact,
+} from './release-evidence';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const requiredAddress = (value: string | undefined, field: string): string => {
@@ -38,16 +49,40 @@ async function deployProxyShell(name: string, unsafeAllow: 'delegatecall'[] = []
   return proxy;
 }
 
-async function proxyRecord(contract: Contract) {
+async function proxyRecord(contract: Contract, artifactKey: ReleaseArtifactKey, build: ReleaseBuildEvidence) {
+  const inspected = await inspectProxyDeployment(ethers.provider, contract.address);
+  await verifyProxyDeployment(
+    ethers.provider,
+    inspected,
+    build.artifacts[artifactKey],
+    build.artifacts.transparentUpgradeableProxy,
+    build.artifacts.proxyAdmin,
+    artifactKey
+  );
   return {
-    proxy: contract.address,
-    implementation: await upgrades.erc1967.getImplementationAddress(contract.address),
-    admin: await upgrades.erc1967.getAdminAddress(contract.address),
+    ...inspected,
+    artifactKey,
+    deploymentBlock: await deploymentBlock(contract),
+  };
+}
+
+async function runtimeRecord(contract: Contract, artifactKey: ReleaseArtifactKey, artifact: ArtifactRuntimeEvidence) {
+  const runtimeCodeHash = await verifyRuntimeArtifact(ethers.provider, contract.address, artifact, artifactKey);
+  return {
+    address: contract.address,
+    artifactKey,
+    runtimeCodeHash,
     deploymentBlock: await deploymentBlock(contract),
   };
 }
 
 async function main() {
+  const reviewedSource = loadReviewedSourceEvidence(
+    repositoryRoot(),
+    process.env.PERPDEX_REVIEWED_RELEASE_COMMIT,
+    process.env.PERPDEX_REVIEWED_SOURCE_TREE
+  );
+  const reviewedBuild = await collectReleaseBuildEvidence(artifacts);
   const network = await ethers.provider.getNetwork();
   if (network.chainId !== GALILEO_CHAIN_ID) {
     throw new Error(`refusing deployment: expected chain ${GALILEO_CHAIN_ID}, got ${network.chainId}`);
@@ -138,9 +173,17 @@ async function main() {
     if (configuredBook !== virtualBook.address) {
       throw new Error(`virtual-book verification failed for ${product.symbol}`);
     }
+    const runtimeCodeHash = await verifyRuntimeArtifact(
+      ethers.provider,
+      virtualBook.address,
+      reviewedBuild.artifacts.virtualBook,
+      `${product.symbol} virtual book`
+    );
     markets[product.symbol] = {
       productId: product.productId,
       virtualBook: virtualBook.address,
+      artifactKey: 'virtualBook',
+      runtimeCodeHash,
       virtualBookDeploymentBlock: await deploymentBlock(virtualBook),
       sizeIncrementX18: product.sizeIncrementX18,
       minSizeX18: product.minSizeX18,
@@ -162,10 +205,17 @@ async function main() {
   }
 
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     release: 'bond-perpdex-galileo-audited-base',
     source: {
       auditedBaseCommit: AUDITED_BASE_COMMIT,
+      reviewedReleaseCommit: reviewedSource.releaseCommit,
+      reviewedSourceTree: reviewedSource.sourceTree,
+      compiler: reviewedBuild.compiler,
+      artifacts: reviewedBuild.artifacts,
+      artifactRuntimeHashes: Object.fromEntries(
+        Object.entries(reviewedBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
+      ),
       productConfigSha256: sha256File(productsFile),
       verifierPublicKeysSha256: sha256File(verifierFile),
       explicitDeltas: [
@@ -194,19 +244,17 @@ async function main() {
     },
     contracts: {
       sanctions: {
-        address: sanctions.address,
-        deploymentBlock: await deploymentBlock(sanctions),
+        ...(await runtimeRecord(sanctions, 'sanctions', reviewedBuild.artifacts.sanctions)),
       },
       clearinghouseLiq: {
-        address: clearinghouseLiq.address,
-        deploymentBlock: await deploymentBlock(clearinghouseLiq),
+        ...(await runtimeRecord(clearinghouseLiq, 'clearinghouseLiq', reviewedBuild.artifacts.clearinghouseLiq)),
       },
-      verifier: await proxyRecord(verifier),
-      endpoint: await proxyRecord(endpoint),
-      clearinghouse: await proxyRecord(clearinghouse),
-      spotEngine: await proxyRecord(spotEngine),
-      perpEngine: await proxyRecord(perpEngine),
-      offchainExchange: await proxyRecord(offchainExchange),
+      verifier: await proxyRecord(verifier, 'verifier', reviewedBuild),
+      endpoint: await proxyRecord(endpoint, 'endpoint', reviewedBuild),
+      clearinghouse: await proxyRecord(clearinghouse, 'clearinghouse', reviewedBuild),
+      spotEngine: await proxyRecord(spotEngine, 'spotEngine', reviewedBuild),
+      perpEngine: await proxyRecord(perpEngine, 'perpEngine', reviewedBuild),
+      offchainExchange: await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild),
     },
     markets,
     gates: {
