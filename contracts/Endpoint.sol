@@ -313,6 +313,12 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
             )
         });
         slowModeConfig = _slowModeConfig;
+        emit DepositCollateralWithReferral(
+            subaccount,
+            productId,
+            amount,
+            referralCode
+        );
     }
 
     function requireUnsanctioned(address sender) internal view virtual {

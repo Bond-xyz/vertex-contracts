@@ -1,6 +1,9 @@
 secrets.json
 .secrets
 .env
+.env.galileo.local
+verifier-private-keys.galileo.local.json
+config/*.local.json
 
 node_modules/
 .idea/
@@ -16,6 +19,9 @@ cache/
 # Typechain
 typechain-types/
 artifacts/
+
+# Network deployment output is reviewed and promoted separately.
+deployments/16602/*.local.json
 
 # ABIs
 abis/

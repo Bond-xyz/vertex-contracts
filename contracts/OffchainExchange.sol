@@ -309,12 +309,12 @@ contract OffchainExchange is
 
         return
             (order.priceX18 > 0) &&
-            //            _checkSignature(
-            //                order.sender,
-            //                orderDigest,
-            //                linkedSigner,
-            //                signedOrder.signature
-            //            ) &&
+            _checkSignature(
+                order.sender,
+                orderDigest,
+                linkedSigner,
+                signedOrder.signature
+            ) &&
             // valid amount
             (order.amount != 0) &&
             !_expired(order.expiration);

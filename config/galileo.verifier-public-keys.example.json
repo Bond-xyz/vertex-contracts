@@ -1,0 +1,9 @@
+{
+  "chainId": 16602,
+  "signerBitmask": 7,
+  "keys": [
+    { "x": "0xREPLACE", "y": "0xREPLACE" },
+    { "x": "0xREPLACE", "y": "0xREPLACE" },
+    { "x": "0xREPLACE", "y": "0xREPLACE" }
+  ]
+}
