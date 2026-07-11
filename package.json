@@ -11,6 +11,7 @@
     "test": "TS_NODE_TRANSPILE_ONLY=1 hardhat test --network hardhat",
     "test:release": "TS_NODE_TRANSPILE_ONLY=1 hardhat test test/release-gates.test.ts test/release-attestation.test.ts --network hardhat",
     "evidence:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/collect-galileo-review-inputs.ts --network hardhat",
+    "intent:galileo": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/create-galileo-deployment-intent.ts",
     "keys:galileo": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/generate-testnet-verifier-keys.ts",
     "deploy:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/deploy-galileo.ts --network galileo",
     "verify:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/verify-galileo-deployment.ts --network galileo"

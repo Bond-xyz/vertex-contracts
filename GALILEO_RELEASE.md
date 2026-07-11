@@ -29,15 +29,29 @@ The deployer rejects any substitute address or token metadata and never deploys 
 
 ## Signed review and reproducible-build gate
 
-Deployment requires a clean committed checkout and one EIP-712 release attestation signed outside the deployment process by a reviewer named in the tracked [`config/galileo.release-policy.json`](config/galileo.release-policy.json). Environment variables cannot change the reviewer allowlist or policy. The signed payload binds the policy version and hash, chain and exact USDC.e collateral identity, release commit and source tree, deterministic build-evidence digest, product-config digest, Verifier-config digest, signer count, and signer bitmask.
+Deployment requires a clean committed checkout and one EIP-712 release attestation signed outside the deployment process by a reviewer named in the tracked [`config/galileo.release-policy.json`](config/galileo.release-policy.json). Environment variables cannot change the reviewer allowlist or policy. The signed payload binds the policy version and hash, `g-bond` project and Galileo release identities, chain and exact USDC.e collateral identity, release commit and source tree, deterministic build-evidence digest, product-config digest, Verifier-config digest, signer count and signer bitmask, plus a single-use deployment intent.
+
+The ignored deployment-intent file binds a unique deployment ID and release nonce, expiry, nonzero deployer and sequencer, the deployer's exact pending transaction nonce, and the contract address that nonce must create. Create it from public values only:
+
+```bash
+export PERPDEX_DEPLOYER_ADDRESS=0x...
+export PERPDEX_SEQUENCER_ADDRESS=0x...
+export PERPDEX_DEPLOYMENT_NONCE=1
+export PERPDEX_FIRST_TRANSACTION_NONCE=<current-pending-nonce>
+export PERPDEX_RELEASE_EXPIRES_AT=<unix-seconds>
+export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.json
+corepack yarn intent:galileo
+```
+
+The deployer must still have that exact pending nonce, the intent must be unexpired, and the expected first contract address must have no bytecode immediately before the first transaction. The sanctions deployment explicitly consumes that nonce. Once any first transaction is mined, the attestation cannot authorize another graph; partial-deployment recovery requires a new intent and external signature. Re-verifying the historical signature postflight remains valid.
 
 `corepack yarn evidence:galileo` produces only an unsigned review request containing the EIP-712 domain, types, payload, and digest. It never creates a signature or accepted attestation. The independent reviewer checks the clean commit and evidence, signs the exact payload using their normal external signing process, and returns a local JSON object with `schemaVersion`, the unchanged `payload`, and the 65-byte `signature`. The deployer stores it at the ignored path selected by `PERPDEX_RELEASE_ATTESTATION_FILE`.
 
-The deployment script validates the signature against tracked policy and recomputes the clean Git commit/tree plus every bound digest immediately before its first transaction. After all transactions, it repeats the complete validation and refuses to write a schema-v4 deployment manifest if the signature, reviewer, commit/tree, policy, build, products, or Verifier evidence drifted. The standalone verifier repeats the signed-evidence check and compares it to both the local checkout and schema-v4 manifest.
+The deployment script validates the signature against tracked policy and recomputes the clean Git commit/tree plus every bound digest immediately before its first transaction. It also rejects a zero sequencer, a reviewer who is the deployer or sequencer, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v5 deployment manifest if the signature, reviewer, intent, commit/tree, policy, build, products, or Verifier evidence drifted. The standalone verifier repeats reviewer independence and signed-evidence checks against both the local checkout and schema-v5 manifest.
 
 Build evidence does not trust artifact/build-info agreement alone. It deterministically recompiles each application build input with exact solc `0.8.13`, then requires the security-relevant compiler output and every artifact's creation/runtime bytecode to match. OpenZeppelin upgrades-core deploys prebuilt `TransparentUpgradeableProxy` and `ProxyAdmin` artifacts originally compiled by exact solc `0.8.9`; the evidence collector deterministically recompiles that package's embedded build input with exact `0.8.9` and requires byte-for-byte equality. Both compiler versions, full settings, input/output hashes, source hashes, creation hashes, and runtime hashes are included in the signed build-evidence digest.
 
-Post-deploy verification also reads each transparent proxy's EIP-1967 implementation and admin slots and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. It verifies the Clearinghouse's active liquidation delegate target and runtime; all eight live Verifier public-key slots, the exact signer count, and signer bitmask `7`; every VirtualBook's immutable product ID; the exact Spot and Perp product-ID sets; every Perp risk weight and price; size increment, minimum size, and LP spread; Clearinghouse spreads; and the product-zero quote token. CI rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
+Post-deploy verification also reads each transparent proxy's EIP-1967 implementation and admin slots and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. A deployment starts only when `.openzeppelin/unknown-16602.json` is absent, forces new implementation deployments, and records each proxy, implementation, and ProxyAdmin creation transaction hash, deployer nonce, block number/hash, and address. The verifier replays those receipts and requires the shared ProxyAdmin owner to remain the signed deployer. It also verifies the Clearinghouse's active liquidation delegate target and runtime; all eight live Verifier public-key slots, three distinct verifier keys, the exact signer count, and signer bitmask `7`; every VirtualBook's immutable product ID; the exact Spot and Perp product-ID sets; every Perp risk weight and price; size increment, minimum size, and LP spread; Clearinghouse spreads; and the product-zero quote token. CI rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
 
 ## Release gate
 
@@ -47,7 +61,7 @@ corepack yarn force-compile
 corepack yarn test:release
 ```
 
-The release suite includes negative regressions for blocked-policy, unsigned, forged, unallowlisted, stale, and operator-conflicted reviewer attestations; source/settings/compiler and paired artifact/build-info tampering; pre-transaction and pre-manifest fail-closed behavior; a one-byte artifact mutation; historical Verifier signer-count corruption; wrong signer count and bitmask; signed bitmask-`7` execution; and every live market/risk mismatch class.
+The release suite includes negative regressions for blocked-policy, unsigned, forged, unallowlisted, stale, replayed, expired, zero-operator, and operator-conflicted reviewer attestations; duplicate Verifier keys; stale valid OpenZeppelin manifests; source/settings/compiler and paired artifact/build-info tampering; pre-transaction and pre-manifest fail-closed behavior; a one-byte artifact mutation; historical Verifier signer-count corruption; wrong signer count and bitmask; signed bitmask-`7` execution; creation-transaction and ProxyAdmin-owner provenance; and every live market/risk mismatch class.
 
 Generate three independent Galileo-only verifier keys without printing them:
 
@@ -71,6 +85,7 @@ export PERPDEX_ENV_FILE=/Users/blackbera/Desktop/Bond/perpdex-rust-backend/contr
 export PERPDEX_VERIFIER_PUBLIC_KEYS_FILE=./config/galileo.verifier-public-keys.local.json
 export PERPDEX_PRODUCTS_FILE=./config/galileo.products.json
 export PERPDEX_RELEASE_ATTESTATION_FILE=./config/galileo.release-attestation.local.json
+export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.json
 export PERPDEX_DEPLOYMENT_MANIFEST=./deployments/16602/latest.local.json
 corepack yarn deploy:galileo
 corepack yarn verify:galileo

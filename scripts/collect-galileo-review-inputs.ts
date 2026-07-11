@@ -7,7 +7,15 @@ async function main() {
   const verifierFile = path.resolve(
     process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
   );
-  const request = await collectUnsignedReleaseReviewRequest({ artifacts, productsFile, verifierFile });
+  const deploymentIntentFile = path.resolve(
+    process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
+  );
+  const request = await collectUnsignedReleaseReviewRequest({
+    artifacts,
+    productsFile,
+    verifierFile,
+    deploymentIntentFile,
+  });
   console.log(JSON.stringify(request, null, 2));
   console.error('Unsigned review request only. No accepted attestation or reviewer signature was created.');
 }

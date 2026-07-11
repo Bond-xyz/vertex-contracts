@@ -1,14 +1,18 @@
 import { expect } from 'chai';
-import { artifacts, ethers, upgrades } from 'hardhat';
+import { Manifest } from '@openzeppelin/upgrades-core';
+import { artifacts, ethers, network, upgrades } from 'hardhat';
 import { BigNumber, Contract, Signer, Wallet, utils } from 'ethers';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
-import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
+import { GALILEO_USDCE_ADDRESS, loadVerifierConfig, requireGalileoUsdce } from '../scripts/deployment-config';
 import {
   assertArtifactMatchesBuildInfo,
+  assertFreshOpenZeppelinManifestAbsent,
   assertRuntimeSizeBudget,
   collectReleaseBuildEvidence,
+  collectContractCreationEvidence,
   deterministicSha256,
   ENDPOINT_RUNTIME_BUDGET_BYTES,
   EIP170_MAX_RUNTIME_BYTES,
@@ -17,8 +21,10 @@ import {
   RELEASE_ARTIFACTS,
   releaseBuildEvidenceSha256,
   verifyActiveClearinghouseLiq,
+  verifyContractCreationEvidence,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
+  verifyProxyAdminOwner,
   verifyRuntimeArtifact,
   verifyVerifierPublicKeys,
   verifyVerifierQuorumConfiguration,
@@ -96,6 +102,24 @@ function signedBatchPayload(idx: number, transactions: string[]) {
 }
 
 describe('Galileo audited-base release gates', () => {
+  const hardhatManifestFile = path.join(__dirname, '..', '.openzeppelin', 'unknown-31337.json');
+  let originalHardhatManifest: string | undefined;
+
+  before(() => {
+    if (fs.existsSync(hardhatManifestFile)) {
+      originalHardhatManifest = fs.readFileSync(hardhatManifestFile, 'utf8');
+      fs.rmSync(hardhatManifestFile);
+    }
+  });
+
+  after(() => {
+    if (fs.existsSync(hardhatManifestFile)) fs.rmSync(hardhatManifestFile);
+    if (originalHardhatManifest !== undefined) {
+      fs.mkdirSync(path.dirname(hardhatManifestFile), { recursive: true });
+      fs.writeFileSync(hardhatManifestFile, originalHardhatManifest);
+    }
+  });
+
   it('records reviewed compiler/runtime hashes and enforces the Endpoint size budget', async () => {
     const build = await collectReleaseBuildEvidence(artifacts);
     expect(build.compiler.solcVersion).to.equal('0.8.13');
@@ -141,6 +165,50 @@ describe('Galileo audited-base release gates', () => {
     expect(requireGalileoUsdce()).to.equal(GALILEO_USDCE_ADDRESS);
     expect(requireGalileoUsdce(GALILEO_USDCE_ADDRESS.toLowerCase())).to.equal(GALILEO_USDCE_ADDRESS);
     expect(() => requireGalileoUsdce(ethers.constants.AddressZero)).to.throw('substitutes are forbidden');
+  });
+
+  it('rejects duplicate verifier public keys before they can masquerade as a three-signer quorum', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-verifier-'));
+    const file = path.join(directory, 'duplicate-keys.json');
+    const point = publicPoint(TEST_VERIFIER_KEYS[0]);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        chainId: 16602,
+        signerBitmask: 7,
+        keys: [point, point, point].map(({ x, y }) => ({ x: x.toHexString(), y: y.toHexString() })),
+      })
+    );
+    try {
+      expect(() => loadVerifierConfig(file)).to.throw('must be three distinct');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fails before any transaction when a valid stale OpenZeppelin network manifest exists', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-oz-manifest-'));
+    const manifestDir = path.join(directory, '.openzeppelin');
+    fs.mkdirSync(manifestDir);
+    fs.writeFileSync(
+      path.join(manifestDir, 'unknown-16602.json'),
+      JSON.stringify({ manifestVersion: '3.2', impls: {}, proxies: [] })
+    );
+    let transactionCalls = 0;
+    try {
+      expect(() => assertFreshOpenZeppelinManifestAbsent(directory, 16602)).to.throw(
+        'fresh deployment requires absent OpenZeppelin network manifest'
+      );
+      try {
+        assertFreshOpenZeppelinManifestAbsent(directory, 16602);
+        transactionCalls += 1;
+      } catch {
+        // Expected fail-closed boundary.
+      }
+      expect(transactionCalls).to.equal(0);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('keeps audited transaction ordinals and omits UpdatePerpBalance', async () => {
@@ -521,12 +589,14 @@ describe('Galileo audited-base release gates', () => {
 
   it('fresh-deploys and wires the full audited contract graph without old proxies', async () => {
     const [deployer, sequencer, user] = await ethers.getSigners();
+    assertFreshOpenZeppelinManifestAbsent(path.join(__dirname, '..'), 31337);
     const deployShell = async (name: string, unsafeAllow: 'delegatecall'[] = []) => {
       const factory = await ethers.getContractFactory(name);
       const proxy = await upgrades.deployProxy(factory, [], {
         initializer: false,
         kind: 'transparent',
         unsafeAllow,
+        useDeployedImplementation: false,
       });
       await proxy.deployed();
       return proxy;
@@ -546,6 +616,11 @@ describe('Galileo audited-base release gates', () => {
     const perp = await deployShell('PerpEngine');
     const exchange = await deployShell('OffchainExchange');
 
+    const openZeppelinManifest = await Manifest.forNetwork(network.provider);
+    const openZeppelinData = await openZeppelinManifest.read();
+    expect(openZeppelinData.proxies).to.have.length(6);
+    expect(openZeppelinData.admin?.txHash).to.match(/^0x[0-9a-f]{64}$/);
+
     const build = await collectReleaseBuildEvidence(artifacts);
     for (const [key, contract] of [
       ['verifier', verifier],
@@ -556,6 +631,15 @@ describe('Galileo audited-base release gates', () => {
       ['offchainExchange', exchange],
     ] as const) {
       const inspected = await inspectProxyDeployment(ethers.provider, contract.address);
+      const proxyDeployment = openZeppelinData.proxies.find(
+        (deployment) => utils.getAddress(deployment.address) === inspected.proxy
+      );
+      const implementationDeployment = Object.values(openZeppelinData.impls).find(
+        (deployment) => deployment && utils.getAddress(deployment.address) === inspected.implementation
+      );
+      if (!proxyDeployment?.txHash || !implementationDeployment?.txHash || !openZeppelinData.admin?.txHash) {
+        throw new Error(`fresh manifest provenance is incomplete for ${key}`);
+      }
       expect(inspected.implementation).to.equal(await upgrades.erc1967.getImplementationAddress(contract.address));
       expect(inspected.admin).to.equal(await upgrades.erc1967.getAdminAddress(contract.address));
       await verifyProxyDeployment(
@@ -566,6 +650,46 @@ describe('Galileo audited-base release gates', () => {
         build.artifacts.proxyAdmin,
         key
       );
+      const proxyCreation = await collectContractCreationEvidence(
+        ethers.provider,
+        inspected.proxy,
+        proxyDeployment.txHash,
+        deployer.address,
+        `${key} proxy`
+      );
+      await collectContractCreationEvidence(
+        ethers.provider,
+        inspected.implementation,
+        implementationDeployment.txHash,
+        deployer.address,
+        `${key} implementation`
+      );
+      await collectContractCreationEvidence(
+        ethers.provider,
+        inspected.admin,
+        openZeppelinData.admin.txHash,
+        deployer.address,
+        `${key} ProxyAdmin`
+      );
+      expect(await verifyProxyAdminOwner(ethers.provider, inspected.admin, deployer.address)).to.equal(
+        deployer.address
+      );
+      if (key === 'verifier') {
+        await expectFailure(
+          verifyContractCreationEvidence(
+            ethers.provider,
+            { ...proxyCreation, blockNumber: proxyCreation.blockNumber + 1 },
+            inspected.proxy,
+            deployer.address,
+            'verifier proxy'
+          ),
+          'creation transaction/block provenance mismatch'
+        );
+        await expectFailure(
+          verifyProxyAdminOwner(ethers.provider, inspected.admin, user.address),
+          'ProxyAdmin owner mismatch'
+        );
+      }
     }
 
     const verifierPublicKeys = normalizeVerifierPublicKeys([

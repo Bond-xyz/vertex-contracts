@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { artifacts, ethers, upgrades } from 'hardhat';
+import { Manifest, ManifestData } from '@openzeppelin/upgrades-core';
+import { artifacts, ethers, network as hardhatNetwork, upgrades } from 'hardhat';
 import { Contract, ContractReceipt, ContractTransaction, utils } from 'ethers';
 import {
   GALILEO_CHAIN_ID,
+  GALILEO_RELEASE_ID,
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
@@ -12,19 +14,24 @@ import {
 } from './deployment-config';
 import {
   ArtifactRuntimeEvidence,
+  assertFreshOpenZeppelinManifestAbsent,
+  collectContractCreationEvidence,
   inspectProxyDeployment,
   normalizeVerifierPublicKeys,
   ReleaseArtifactKey,
   ReleaseBuildEvidence,
+  sha256File,
   verifyActiveClearinghouseLiq,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
+  verifyProxyAdminOwner,
   verifyRuntimeArtifact,
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
 import {
   assertIndependentReleaseReviewer,
+  assertDeploymentIntentAvailableForFirstTransaction,
   assertSameVerifiedReleaseEvidence,
   collectAndVerifyReleaseEvidence,
   executeAfterVerifiedPreflight,
@@ -36,7 +43,9 @@ import {
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const requiredAddress = (value: string | undefined, field: string): string => {
   if (!value || !utils.isAddress(value)) throw new Error(`${field} must be an address`);
-  return utils.getAddress(value);
+  const address = utils.getAddress(value);
+  if (address === ethers.constants.AddressZero) throw new Error(`${field} must not be the zero address`);
+  return address;
 };
 
 const receipt = async (transaction: ContractTransaction): Promise<ContractReceipt> => transaction.wait();
@@ -50,12 +59,36 @@ async function deployProxyShell(name: string, unsafeAllow: 'delegatecall'[] = []
     initializer: false,
     kind: 'transparent',
     unsafeAllow,
+    useDeployedImplementation: false,
   });
   await proxy.deployed();
   return proxy;
 }
 
-async function proxyRecord(contract: Contract, artifactKey: ReleaseArtifactKey, build: ReleaseBuildEvidence) {
+function manifestTransactionHash(deployment: { txHash?: string } | undefined, label: string): string {
+  if (!deployment?.txHash || !utils.isHexString(deployment.txHash, 32)) {
+    throw new Error(`fresh OpenZeppelin manifest is missing ${label} creation transaction`);
+  }
+  return deployment.txHash;
+}
+
+function manifestImplementation(data: ManifestData, address: string) {
+  const expected = utils.getAddress(address);
+  return Object.values(data.impls).find((deployment) => {
+    if (!deployment) return false;
+    const addresses = [deployment.address, ...(deployment.allAddresses || [])];
+    return addresses.some((candidate) => utils.getAddress(candidate) === expected);
+  });
+}
+
+async function proxyRecord(
+  contract: Contract,
+  artifactKey: ReleaseArtifactKey,
+  build: ReleaseBuildEvidence,
+  openZeppelinManifest: ManifestData,
+  deployer: string,
+  minimumNonce: number
+) {
   const inspected = await inspectProxyDeployment(ethers.provider, contract.address);
   await verifyProxyDeployment(
     ethers.provider,
@@ -65,20 +98,70 @@ async function proxyRecord(contract: Contract, artifactKey: ReleaseArtifactKey, 
     build.artifacts.proxyAdmin,
     artifactKey
   );
+  const proxyDeployment = openZeppelinManifest.proxies.find(
+    (deployment) => utils.getAddress(deployment.address) === inspected.proxy
+  );
+  const implementationDeployment = manifestImplementation(openZeppelinManifest, inspected.implementation);
+  const adminDeployment = openZeppelinManifest.admin;
+  if (!adminDeployment || utils.getAddress(adminDeployment.address) !== inspected.admin) {
+    throw new Error(`${artifactKey} ProxyAdmin is not the fresh manifest admin`);
+  }
+  const provenance = {
+    proxy: await collectContractCreationEvidence(
+      ethers.provider,
+      inspected.proxy,
+      manifestTransactionHash(proxyDeployment, `${artifactKey} proxy`),
+      deployer,
+      `${artifactKey} proxy`,
+      minimumNonce
+    ),
+    implementation: await collectContractCreationEvidence(
+      ethers.provider,
+      inspected.implementation,
+      manifestTransactionHash(implementationDeployment, `${artifactKey} implementation`),
+      deployer,
+      `${artifactKey} implementation`,
+      minimumNonce
+    ),
+    admin: await collectContractCreationEvidence(
+      ethers.provider,
+      inspected.admin,
+      manifestTransactionHash(adminDeployment, 'ProxyAdmin'),
+      deployer,
+      'ProxyAdmin',
+      minimumNonce
+    ),
+    adminOwner: await verifyProxyAdminOwner(ethers.provider, inspected.admin, deployer),
+  };
   return {
     ...inspected,
     artifactKey,
     deploymentBlock: await deploymentBlock(contract),
+    provenance,
   };
 }
 
-async function runtimeRecord(contract: Contract, artifactKey: ReleaseArtifactKey, artifact: ArtifactRuntimeEvidence) {
+async function runtimeRecord(
+  contract: Contract,
+  artifactKey: ReleaseArtifactKey,
+  artifact: ArtifactRuntimeEvidence,
+  deployer: string,
+  minimumNonce: number
+) {
   const runtimeCodeHash = await verifyRuntimeArtifact(ethers.provider, contract.address, artifact, artifactKey);
   return {
     address: contract.address,
     artifactKey,
     runtimeCodeHash,
     deploymentBlock: await deploymentBlock(contract),
+    creation: await collectContractCreationEvidence(
+      ethers.provider,
+      contract.address,
+      contract.deployTransaction.hash,
+      deployer,
+      artifactKey,
+      minimumNonce
+    ),
   };
 }
 
@@ -89,6 +172,9 @@ async function main() {
   );
   const attestationFile = path.resolve(
     process.env.PERPDEX_RELEASE_ATTESTATION_FILE || './config/galileo.release-attestation.local.json'
+  );
+  const deploymentIntentFile = path.resolve(
+    process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
   );
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const network = await ethers.provider.getNetwork();
@@ -112,7 +198,14 @@ async function main() {
 
   // The signed attestation and clean source tree are recomputed immediately before the first transaction.
   const firstDeployment = await executeAfterVerifiedPreflight(
-    () => collectAndVerifyReleaseEvidence({ artifacts, productsFile, verifierFile, attestationFile }),
+    () =>
+      collectAndVerifyReleaseEvidence({
+        artifacts,
+        productsFile,
+        verifierFile,
+        attestationFile,
+        deploymentIntentFile,
+      }),
     async (preflight: VerifiedReleaseEvidence) => {
       const [deployer] = await ethers.getSigners();
       const sequencer = requiredAddress(
@@ -120,14 +213,31 @@ async function main() {
         'PERPDEX_SEQUENCER_ADDRESS'
       );
       assertIndependentReleaseReviewer(preflight.reviewer.address, deployer.address, sequencer);
+      const openZeppelinManifest = await Manifest.forNetwork(hardhatNetwork.provider);
+      assertFreshOpenZeppelinManifestAbsent(path.resolve(__dirname, '..'), GALILEO_CHAIN_ID, openZeppelinManifest.file);
+      const latestBlock = await ethers.provider.getBlock('latest');
+      if (!latestBlock) throw new Error('latest Galileo block is unavailable');
+      assertDeploymentIntentAvailableForFirstTransaction(preflight.deploymentIntent, {
+        deployer: deployer.address,
+        sequencer,
+        pendingNonce: await deployer.getTransactionCount('pending'),
+        chainTimestamp: latestBlock.timestamp,
+        expectedFirstContractCode: await ethers.provider.getCode(preflight.deploymentIntent.expectedFirstContract),
+      });
       // Fresh contracts only. This is the first transaction-producing call in the script.
       const Sanctions = await ethers.getContractFactory('MockSanctionsList');
-      const sanctions = await Sanctions.deploy();
+      const sanctions = await Sanctions.deploy({ nonce: preflight.deploymentIntent.firstTransactionNonce });
+      if (
+        sanctions.address !== preflight.deploymentIntent.expectedFirstContract ||
+        sanctions.deployTransaction.nonce !== preflight.deploymentIntent.firstTransactionNonce
+      ) {
+        throw new Error('first deployment transaction does not match signed deployment intent');
+      }
       await sanctions.deployed();
-      return { preflight, deployer, sequencer, sanctions };
+      return { preflight, deployer, sequencer, sanctions, openZeppelinManifestFile: openZeppelinManifest.file };
     }
   );
-  const { preflight, deployer, sequencer, sanctions } = firstDeployment;
+  const { preflight, deployer, sequencer, sanctions, openZeppelinManifestFile } = firstDeployment;
   const reviewedBuild = preflight.build;
   const products = preflight.products;
   const verifierConfig = preflight.verifierConfig;
@@ -214,6 +324,14 @@ async function main() {
       artifactKey: 'virtualBook',
       runtimeCodeHash,
       virtualBookDeploymentBlock: await deploymentBlock(virtualBook),
+      creation: await collectContractCreationEvidence(
+        ethers.provider,
+        virtualBook.address,
+        virtualBook.deployTransaction.hash,
+        deployer.address,
+        `${product.symbol} virtual book`,
+        preflight.deploymentIntent.firstTransactionNonce
+      ),
       sizeIncrementX18: product.sizeIncrementX18,
       minSizeX18: product.minSizeX18,
       lpSpreadX18: product.lpSpreadX18,
@@ -236,11 +354,36 @@ async function main() {
     throw new Error('unsafe batch ABI detected');
   }
 
-  const sanctionsRecord = await runtimeRecord(sanctions, 'sanctions', reviewedBuild.artifacts.sanctions);
+  const finalOpenZeppelinManifest = await Manifest.forNetwork(hardhatNetwork.provider);
+  if (finalOpenZeppelinManifest.file !== openZeppelinManifestFile) {
+    throw new Error('OpenZeppelin network manifest path changed during deployment');
+  }
+  const openZeppelinManifestData = await finalOpenZeppelinManifest.read();
+  if (
+    openZeppelinManifestData.proxies.length !== 6 ||
+    Object.values(openZeppelinManifestData.impls).filter(Boolean).length !== 6 ||
+    !openZeppelinManifestData.admin
+  ) {
+    throw new Error('fresh OpenZeppelin manifest must contain exactly six proxies, six implementations, and one admin');
+  }
+  const openZeppelinManifestPath = path.resolve(__dirname, '..', finalOpenZeppelinManifest.file);
+  if (!fs.existsSync(openZeppelinManifestPath)) {
+    throw new Error('fresh OpenZeppelin deployment manifest was not written');
+  }
+
+  const sanctionsRecord = await runtimeRecord(
+    sanctions,
+    'sanctions',
+    reviewedBuild.artifacts.sanctions,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
   const clearinghouseLiqRecord = await runtimeRecord(
     clearinghouseLiq,
     'clearinghouseLiq',
-    reviewedBuild.artifacts.clearinghouseLiq
+    reviewedBuild.artifacts.clearinghouseLiq,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
   );
   await verifyActiveClearinghouseLiq(
     ethers.provider,
@@ -249,26 +392,81 @@ async function main() {
     reviewedBuild.artifacts.clearinghouseLiq
   );
   const verifierRecord = {
-    ...(await proxyRecord(verifier, 'verifier', reviewedBuild)),
+    ...(await proxyRecord(
+      verifier,
+      'verifier',
+      reviewedBuild,
+      openZeppelinManifestData,
+      deployer.address,
+      preflight.deploymentIntent.firstTransactionNonce
+    )),
     publicKeys: paddedVerifierPoints,
     signerCount: verifierPoints.length,
     signerBitmask: verifierConfig.signerBitmask,
   };
-  const endpointRecord = await proxyRecord(endpoint, 'endpoint', reviewedBuild);
-  const clearinghouseRecord = await proxyRecord(clearinghouse, 'clearinghouse', reviewedBuild);
-  const spotEngineRecord = await proxyRecord(spotEngine, 'spotEngine', reviewedBuild);
-  const perpEngineRecord = await proxyRecord(perpEngine, 'perpEngine', reviewedBuild);
-  const offchainExchangeRecord = await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild);
+  const endpointRecord = await proxyRecord(
+    endpoint,
+    'endpoint',
+    reviewedBuild,
+    openZeppelinManifestData,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
+  const clearinghouseRecord = await proxyRecord(
+    clearinghouse,
+    'clearinghouse',
+    reviewedBuild,
+    openZeppelinManifestData,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
+  const spotEngineRecord = await proxyRecord(
+    spotEngine,
+    'spotEngine',
+    reviewedBuild,
+    openZeppelinManifestData,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
+  const perpEngineRecord = await proxyRecord(
+    perpEngine,
+    'perpEngine',
+    reviewedBuild,
+    openZeppelinManifestData,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
+  const offchainExchangeRecord = await proxyRecord(
+    offchainExchange,
+    'offchainExchange',
+    reviewedBuild,
+    openZeppelinManifestData,
+    deployer.address,
+    preflight.deploymentIntent.firstTransactionNonce
+  );
 
   // A fresh signed-attestation and clean-tree verification gates manifest creation after all transactions.
   await writeAfterVerifiedPostflight(
-    () => collectAndVerifyReleaseEvidence({ artifacts, productsFile, verifierFile, attestationFile }),
+    () =>
+      collectAndVerifyReleaseEvidence({
+        artifacts,
+        productsFile,
+        verifierFile,
+        attestationFile,
+        deploymentIntentFile,
+      }),
     async (postflight: VerifiedReleaseEvidence) => {
       assertSameVerifiedReleaseEvidence(preflight, postflight);
       const finalBuild = postflight.build;
       const manifest = {
-        schemaVersion: 4,
-        release: 'bond-perpdex-galileo-audited-base',
+        schemaVersion: 5,
+        release: GALILEO_RELEASE_ID,
+        deploymentIntent: postflight.deploymentIntent,
+        openZeppelin: {
+          startedWithoutNetworkManifest: true,
+          manifestFile: finalOpenZeppelinManifest.file,
+          manifestSha256: sha256File(openZeppelinManifestPath),
+        },
         source: {
           auditedBaseCommit: AUDITED_BASE_COMMIT,
           reviewedReleaseCommit: postflight.source.releaseCommit,
@@ -333,6 +531,10 @@ async function main() {
           slowModeExitPreserved: true,
           productRiskConfigApproved: true,
           reviewerSignedAttestationVerifiedPreAndPost: true,
+          signedDeploymentIntentSingleUseNonce: true,
+          freshOpenZeppelinNetworkManifest: true,
+          implementationAndAdminCreationProvenance: true,
+          proxyAdminOwnerVerified: true,
           deterministicApplicationSolc013Reproduction: true,
           exactVerifierSignerCountAndBitmask: true,
           exactLiveMarketConfiguration: true,

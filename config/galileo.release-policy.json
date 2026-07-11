@@ -1,7 +1,9 @@
 {
   "schemaVersion": 1,
   "policyId": "bond-perpdex-galileo-testnet-release",
-  "policyVersion": 1,
+  "policyVersion": 2,
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-galileo-audited-base",
   "attestationDomain": {
     "name": "Bond PerpDex Galileo Release",
     "version": "1"

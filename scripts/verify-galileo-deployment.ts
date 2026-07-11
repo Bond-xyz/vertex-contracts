@@ -4,6 +4,7 @@ import { BigNumber } from 'ethers';
 import { artifacts, ethers } from 'hardhat';
 import {
   GALILEO_CHAIN_ID,
+  GALILEO_RELEASE_ID,
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
@@ -13,16 +14,23 @@ import type { ProductConfig } from './deployment-config';
 import {
   assertVerifierPublicKeysMatch,
   assertBuildEvidenceMatches,
+  ContractCreationEvidence,
   normalizeVerifierPublicKeys,
   ReleaseBuildEvidence,
   verifyActiveClearinghouseLiq,
+  verifyContractCreationEvidence,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
+  verifyProxyAdminOwner,
   verifyRuntimeArtifact,
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
-import { collectAndVerifyReleaseEvidence, TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
+import {
+  assertManifestOperatorsMatchSignedIntent,
+  collectAndVerifyReleaseEvidence,
+  TRACKED_GALILEO_RELEASE_POLICY,
+} from './release-attestation';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -45,6 +53,7 @@ type ManifestMarket = ManifestMarketConfig & {
   artifactKey: string;
   virtualBook: string;
   runtimeCodeHash: string;
+  creation: ContractCreationEvidence;
 };
 
 function assertManifestMarketMatchesConfig(
@@ -74,9 +83,10 @@ function assertManifestMarketMatchesConfig(
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (manifest.schemaVersion !== 4) {
-    throw new Error('deployment manifest must use signed-attestation provenance schema version 4');
+  if (manifest.schemaVersion !== 5) {
+    throw new Error('deployment manifest must use single-use signed-attestation provenance schema version 5');
   }
+  if (manifest.release !== GALILEO_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
   const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
   const verifierFile = path.resolve(
     process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
@@ -90,7 +100,17 @@ async function main() {
     productsFile,
     verifierFile,
     attestation: recordedAttestation.signedAttestation,
+    deploymentIntent: manifest.deploymentIntent,
   });
+  assertManifestOperatorsMatchSignedIntent(verifiedRelease, manifest);
+  if (
+    manifest.deploymentIntent.expectedFirstContract !== manifest.contracts.sanctions.address ||
+    manifest.openZeppelin?.startedWithoutNetworkManifest !== true ||
+    manifest.openZeppelin?.manifestFile !== `.openzeppelin/unknown-${GALILEO_CHAIN_ID}.json` ||
+    !/^[0-9a-f]{64}$/i.test(manifest.openZeppelin?.manifestSha256 || '')
+  ) {
+    throw new Error('deployment manifest does not prove the signed fresh-deployment boundary');
+  }
   if (
     manifest.source.reviewedReleaseCommit !== verifiedRelease.source.releaseCommit ||
     manifest.source.reviewedSourceTree !== verifiedRelease.source.sourceTree ||
@@ -188,6 +208,27 @@ async function main() {
   const perpEngine = await ethers.getContractAt('PerpEngine', manifest.contracts.perpEngine.proxy);
   const verifier = await ethers.getContractAt('Verifier', manifest.contracts.verifier.proxy);
 
+  const minimumDeploymentNonce = manifest.deploymentIntent.firstTransactionNonce;
+  if (manifest.contracts.sanctions.creation?.transactionNonce !== minimumDeploymentNonce) {
+    throw new Error('signed deployment intent was not consumed by the first sanctions deployment');
+  }
+  await verifyContractCreationEvidence(
+    ethers.provider,
+    manifest.contracts.sanctions.creation,
+    manifest.contracts.sanctions.address,
+    manifest.deployer,
+    'sanctions',
+    minimumDeploymentNonce
+  );
+  await verifyContractCreationEvidence(
+    ethers.provider,
+    manifest.contracts.clearinghouseLiq.creation,
+    manifest.contracts.clearinghouseLiq.address,
+    manifest.deployer,
+    'clearinghouse liquidation implementation',
+    minimumDeploymentNonce
+  );
+
   await verifyRuntimeArtifact(
     ethers.provider,
     manifest.contracts.sanctions.address,
@@ -215,6 +256,38 @@ async function main() {
       reviewedBuild.artifacts.proxyAdmin,
       key
     );
+    if (!record.provenance) throw new Error(`manifest is missing fresh-deployment provenance for ${key}`);
+    await verifyContractCreationEvidence(
+      ethers.provider,
+      record.provenance.proxy,
+      record.proxy,
+      manifest.deployer,
+      `${key} proxy`,
+      minimumDeploymentNonce
+    );
+    await verifyContractCreationEvidence(
+      ethers.provider,
+      record.provenance.implementation,
+      record.implementation,
+      manifest.deployer,
+      `${key} implementation`,
+      minimumDeploymentNonce
+    );
+    await verifyContractCreationEvidence(
+      ethers.provider,
+      record.provenance.admin,
+      record.admin,
+      manifest.deployer,
+      `${key} ProxyAdmin`,
+      minimumDeploymentNonce
+    );
+    const adminOwner = await verifyProxyAdminOwner(
+      ethers.provider,
+      record.admin,
+      manifest.deployer,
+      `${key} ProxyAdmin`
+    );
+    if (record.provenance.adminOwner !== adminOwner) throw new Error(`${key} manifest ProxyAdmin owner mismatch`);
   }
   await verifyVerifierQuorumConfiguration(
     verifier,
@@ -234,6 +307,14 @@ async function main() {
       market.runtimeCodeHash
     );
     await verifyVirtualBookProductId(ethers.provider, market.virtualBook, market.productId, `${symbol} virtual book`);
+    await verifyContractCreationEvidence(
+      ethers.provider,
+      market.creation,
+      market.virtualBook,
+      manifest.deployer,
+      `${symbol} virtual book`,
+      minimumDeploymentNonce
+    );
   }
 
   const quoteContract = new ethers.Contract(

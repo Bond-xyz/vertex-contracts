@@ -3,6 +3,8 @@ import path from 'path';
 import { BigNumber, utils } from 'ethers';
 
 export const GALILEO_CHAIN_ID = 16602;
+export const GALILEO_PROJECT_ID = 'g-bond';
+export const GALILEO_RELEASE_ID = 'bond-perpdex-galileo-audited-base';
 export const GALILEO_USDCE_ADDRESS = '0xF2506aa3684871549083d235453a1dcDcCB3396c';
 export const GALILEO_USDCE_SYMBOL = 'USDC.e';
 export const GALILEO_USDCE_DECIMALS = 6;
@@ -95,13 +97,16 @@ export function loadVerifierConfig(file: string): VerifierConfig {
   if (config.keys.length !== 3) {
     throw new Error('audited Endpoint hardcodes bitmask 7; exactly three verifier keys are required');
   }
-  for (const [index, point] of config.keys.entries()) {
+  const normalizedKeys = config.keys.map((point, index) => {
     const publicKey = utils.hexConcat(['0x04', utils.hexZeroPad(point.x, 32), utils.hexZeroPad(point.y, 32)]);
     try {
-      utils.computePublicKey(publicKey, false);
+      return utils.computePublicKey(publicKey, false).toLowerCase();
     } catch {
       throw new Error(`verifier public key ${index} is not a secp256k1 point`);
     }
+  });
+  if (new Set(normalizedKeys).size !== normalizedKeys.length) {
+    throw new Error('Galileo verifier public keys must be three distinct secp256k1 points');
   }
   return config;
 }

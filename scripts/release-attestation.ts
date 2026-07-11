@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { utils } from 'ethers';
+import { BigNumber, BigNumberish, constants, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
 import {
   GALILEO_CHAIN_ID,
+  GALILEO_PROJECT_ID,
+  GALILEO_RELEASE_ID,
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
@@ -25,7 +27,7 @@ import {
 } from './release-evidence';
 
 export const TRACKED_GALILEO_RELEASE_POLICY = 'config/galileo.release-policy.json';
-export const RELEASE_ATTESTATION_SCHEMA_VERSION = 1;
+export const RELEASE_ATTESTATION_SCHEMA_VERSION = 2;
 export const ACTIVE_GALILEO_RELEASE_POLICY_STATUS = 'approved_for_galileo_testnet_release';
 
 export type GalileoReleaseReviewer = {
@@ -37,6 +39,8 @@ export type GalileoReleasePolicy = {
   schemaVersion: number;
   policyId: string;
   policyVersion: number;
+  projectId: string;
+  releaseId: string;
   attestationDomain: { name: string; version: string };
   chainId: number;
   collateral: { address: string; productId: number; symbol: string; decimals: number };
@@ -45,11 +49,27 @@ export type GalileoReleasePolicy = {
   status: string;
 };
 
+export type GalileoDeploymentIntent = {
+  schemaVersion: number;
+  projectId: string;
+  releaseId: string;
+  chainId: number;
+  deploymentId: string;
+  deploymentNonce: string;
+  expiresAt: number;
+  deployer: string;
+  sequencer: string;
+  firstTransactionNonce: number;
+  expectedFirstContract: string;
+};
+
 export type ReleaseAttestationPayload = {
   schemaVersion: number;
   policyId: string;
   policyVersion: number;
   policySha256: string;
+  projectId: string;
+  releaseId: string;
   chainId: number;
   collateralToken: string;
   collateralProductId: number;
@@ -62,6 +82,13 @@ export type ReleaseAttestationPayload = {
   verifierConfigSha256: string;
   verifierSignerCount: number;
   verifierSignerBitmask: number;
+  deploymentId: string;
+  deploymentNonce: string;
+  expiresAt: number;
+  deployer: string;
+  sequencer: string;
+  firstTransactionNonce: number;
+  expectedFirstContract: string;
 };
 
 export type SignedReleaseAttestation = {
@@ -87,6 +114,7 @@ export type VerifiedReleaseEvidence = VerifiedReleaseAttestation & {
   productConfigSha256: string;
   verifierConfig: VerifierConfig;
   verifierConfigSha256: string;
+  deploymentIntent: GalileoDeploymentIntent;
 };
 
 export const RELEASE_ATTESTATION_TYPES = {
@@ -95,6 +123,8 @@ export const RELEASE_ATTESTATION_TYPES = {
     { name: 'policyId', type: 'string' },
     { name: 'policyVersion', type: 'uint256' },
     { name: 'policySha256', type: 'bytes32' },
+    { name: 'projectId', type: 'string' },
+    { name: 'releaseId', type: 'string' },
     { name: 'chainId', type: 'uint256' },
     { name: 'collateralToken', type: 'address' },
     { name: 'collateralProductId', type: 'uint32' },
@@ -107,6 +137,13 @@ export const RELEASE_ATTESTATION_TYPES = {
     { name: 'verifierConfigSha256', type: 'bytes32' },
     { name: 'verifierSignerCount', type: 'uint8' },
     { name: 'verifierSignerBitmask', type: 'uint8' },
+    { name: 'deploymentId', type: 'bytes32' },
+    { name: 'deploymentNonce', type: 'uint256' },
+    { name: 'expiresAt', type: 'uint64' },
+    { name: 'deployer', type: 'address' },
+    { name: 'sequencer', type: 'address' },
+    { name: 'firstTransactionNonce', type: 'uint64' },
+    { name: 'expectedFirstContract', type: 'address' },
   ],
 };
 
@@ -131,6 +168,160 @@ function normalizedGitObject(value: string, label: string): string {
   return value.toLowerCase();
 }
 
+function normalizedUintString(value: BigNumberish, label: string, allowZero = false): string {
+  let parsed: BigNumber;
+  try {
+    parsed = BigNumber.from(value);
+  } catch {
+    throw new Error(`${label} must be an unsigned integer`);
+  }
+  if (parsed.lt(0) || (!allowZero && parsed.isZero())) {
+    throw new Error(`${label} must be ${allowZero ? 'non-negative' : 'positive'}`);
+  }
+  if (parsed.gt(BigNumber.from(2).pow(256).sub(1))) throw new Error(`${label} exceeds uint256`);
+  return parsed.toString();
+}
+
+function safeUintNumber(value: number, label: string, allowZero = false): number {
+  if (!Number.isSafeInteger(value) || value < 0 || (!allowZero && value === 0)) {
+    throw new Error(`${label} must be a ${allowZero ? 'non-negative' : 'positive'} safe integer`);
+  }
+  return value;
+}
+
+function nonzeroAddress(value: string, label: string): string {
+  const address = utils.getAddress(value);
+  if (address === constants.AddressZero) throw new Error(`${label} must not be the zero address`);
+  return address;
+}
+
+type DeploymentIntentIdentity = Omit<GalileoDeploymentIntent, 'schemaVersion' | 'deploymentId'>;
+
+export function deploymentIntentId(intent: DeploymentIntentIdentity): string {
+  return utils.keccak256(
+    utils.defaultAbiCoder.encode(
+      ['string', 'string', 'uint256', 'uint256', 'uint64', 'address', 'address', 'uint64', 'address'],
+      [
+        intent.projectId,
+        intent.releaseId,
+        intent.chainId,
+        intent.deploymentNonce,
+        intent.expiresAt,
+        intent.deployer,
+        intent.sequencer,
+        intent.firstTransactionNonce,
+        intent.expectedFirstContract,
+      ]
+    )
+  );
+}
+
+export function createGalileoDeploymentIntent(input: {
+  deploymentNonce: BigNumberish;
+  expiresAt: number;
+  deployer: string;
+  sequencer: string;
+  firstTransactionNonce: number;
+}): GalileoDeploymentIntent {
+  const deployer = nonzeroAddress(input.deployer, 'deployment intent deployer');
+  const sequencer = nonzeroAddress(input.sequencer, 'deployment intent sequencer');
+  const firstTransactionNonce = safeUintNumber(
+    input.firstTransactionNonce,
+    'deployment intent first transaction nonce',
+    true
+  );
+  const identity: DeploymentIntentIdentity = {
+    projectId: GALILEO_PROJECT_ID,
+    releaseId: GALILEO_RELEASE_ID,
+    chainId: GALILEO_CHAIN_ID,
+    deploymentNonce: normalizedUintString(input.deploymentNonce, 'deployment intent nonce'),
+    expiresAt: safeUintNumber(input.expiresAt, 'deployment intent expiry'),
+    deployer,
+    sequencer,
+    firstTransactionNonce,
+    expectedFirstContract: utils.getContractAddress({ from: deployer, nonce: firstTransactionNonce }),
+  };
+  return {
+    schemaVersion: 1,
+    ...identity,
+    deploymentId: deploymentIntentId(identity),
+  };
+}
+
+export function validateDeploymentIntent(intent: GalileoDeploymentIntent): GalileoDeploymentIntent {
+  exactKeys(
+    intent as unknown as Record<string, unknown>,
+    [
+      'schemaVersion',
+      'projectId',
+      'releaseId',
+      'chainId',
+      'deploymentId',
+      'deploymentNonce',
+      'expiresAt',
+      'deployer',
+      'sequencer',
+      'firstTransactionNonce',
+      'expectedFirstContract',
+    ],
+    'deployment intent'
+  );
+  if (
+    intent.schemaVersion !== 1 ||
+    intent.projectId !== GALILEO_PROJECT_ID ||
+    intent.releaseId !== GALILEO_RELEASE_ID ||
+    intent.chainId !== GALILEO_CHAIN_ID
+  ) {
+    throw new Error('deployment intent project/release/chain identity mismatch');
+  }
+  const normalized = createGalileoDeploymentIntent({
+    deploymentNonce: intent.deploymentNonce,
+    expiresAt: intent.expiresAt,
+    deployer: intent.deployer,
+    sequencer: intent.sequencer,
+    firstTransactionNonce: intent.firstTransactionNonce,
+  });
+  if (utils.getAddress(intent.expectedFirstContract) !== normalized.expectedFirstContract) {
+    throw new Error('deployment intent expected first contract does not match deployer nonce');
+  }
+  if (!utils.isHexString(intent.deploymentId, 32) || intent.deploymentId.toLowerCase() !== normalized.deploymentId) {
+    throw new Error('deployment intent ID does not match its canonical identity');
+  }
+  return normalized;
+}
+
+export function loadDeploymentIntent(file: string): GalileoDeploymentIntent {
+  return validateDeploymentIntent(readJson<GalileoDeploymentIntent>(path.resolve(file)));
+}
+
+export function assertDeploymentIntentAvailableForFirstTransaction(
+  intent: GalileoDeploymentIntent,
+  actual: {
+    deployer: string;
+    sequencer: string;
+    pendingNonce: number;
+    chainTimestamp: number;
+    expectedFirstContractCode: string;
+  }
+): void {
+  const expected = validateDeploymentIntent(intent);
+  if (utils.getAddress(actual.deployer) !== expected.deployer) {
+    throw new Error('deployment intent deployer does not match the transaction signer');
+  }
+  if (utils.getAddress(actual.sequencer) !== expected.sequencer) {
+    throw new Error('deployment intent sequencer does not match the configured sequencer');
+  }
+  if (safeUintNumber(actual.pendingNonce, 'pending deployer nonce', true) !== expected.firstTransactionNonce) {
+    throw new Error('deployment intent is stale or already consumed: deployer nonce changed');
+  }
+  if (safeUintNumber(actual.chainTimestamp, 'latest chain timestamp', true) >= expected.expiresAt) {
+    throw new Error('deployment intent has expired');
+  }
+  if (actual.expectedFirstContractCode !== '0x') {
+    throw new Error('deployment intent is already consumed: expected first contract address has bytecode');
+  }
+}
+
 export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoReleasePolicy {
   exactKeys(
     policy as unknown as Record<string, unknown>,
@@ -138,6 +329,8 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
       'schemaVersion',
       'policyId',
       'policyVersion',
+      'projectId',
+      'releaseId',
       'attestationDomain',
       'chainId',
       'collateral',
@@ -162,6 +355,8 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
     !policy.policyId ||
     !Number.isSafeInteger(policy.policyVersion) ||
     policy.policyVersion <= 0 ||
+    policy.projectId !== GALILEO_PROJECT_ID ||
+    policy.releaseId !== GALILEO_RELEASE_ID ||
     !policy.attestationDomain?.name ||
     !policy.attestationDomain?.version ||
     !policy.status
@@ -222,12 +417,23 @@ export function createReleaseAttestationPayload(input: {
   productConfigSha256: string;
   verifierConfigSha256: string;
   verifierConfig: VerifierConfig;
+  deploymentIntent: GalileoDeploymentIntent;
 }): ReleaseAttestationPayload {
+  const deploymentIntent = validateDeploymentIntent(input.deploymentIntent);
+  if (
+    deploymentIntent.projectId !== input.policy.projectId ||
+    deploymentIntent.releaseId !== input.policy.releaseId ||
+    deploymentIntent.chainId !== input.policy.chainId
+  ) {
+    throw new Error('deployment intent does not match tracked release policy identity');
+  }
   return {
     schemaVersion: RELEASE_ATTESTATION_SCHEMA_VERSION,
     policyId: input.policy.policyId,
     policyVersion: input.policy.policyVersion,
     policySha256: normalizedSha256(input.policySha256, 'release policy SHA-256'),
+    projectId: input.policy.projectId,
+    releaseId: input.policy.releaseId,
     chainId: input.policy.chainId,
     collateralToken: utils.getAddress(input.policy.collateral.address),
     collateralProductId: input.policy.collateral.productId,
@@ -240,6 +446,13 @@ export function createReleaseAttestationPayload(input: {
     verifierConfigSha256: normalizedSha256(input.verifierConfigSha256, 'verifier config SHA-256'),
     verifierSignerCount: input.verifierConfig.keys.length,
     verifierSignerBitmask: input.verifierConfig.signerBitmask,
+    deploymentId: deploymentIntent.deploymentId,
+    deploymentNonce: deploymentIntent.deploymentNonce,
+    expiresAt: deploymentIntent.expiresAt,
+    deployer: deploymentIntent.deployer,
+    sequencer: deploymentIntent.sequencer,
+    firstTransactionNonce: deploymentIntent.firstTransactionNonce,
+    expectedFirstContract: deploymentIntent.expectedFirstContract,
   };
 }
 
@@ -312,10 +525,36 @@ export function assertIndependentReleaseReviewer(
   }
 }
 
+function resolveDeploymentIntent(input: {
+  deploymentIntent?: GalileoDeploymentIntent;
+  deploymentIntentFile?: string;
+}): GalileoDeploymentIntent {
+  if ((input.deploymentIntent ? 1 : 0) + (input.deploymentIntentFile ? 1 : 0) !== 1) {
+    throw new Error('exactly one deployment intent object or file is required');
+  }
+  return input.deploymentIntent
+    ? validateDeploymentIntent(input.deploymentIntent)
+    : loadDeploymentIntent(input.deploymentIntentFile as string);
+}
+
+export function assertManifestOperatorsMatchSignedIntent(
+  evidence: VerifiedReleaseEvidence,
+  manifest: { deployer: string; sequencer: string }
+): void {
+  const deployer = nonzeroAddress(manifest.deployer, 'deployment manifest deployer');
+  const sequencer = nonzeroAddress(manifest.sequencer, 'deployment manifest sequencer');
+  if (deployer !== evidence.deploymentIntent.deployer || sequencer !== evidence.deploymentIntent.sequencer) {
+    throw new Error('deployment manifest operators do not match signed deployment intent');
+  }
+  assertIndependentReleaseReviewer(evidence.reviewer.address, deployer, sequencer);
+}
+
 export async function collectUnsignedReleaseReviewRequest(input: {
   artifacts: Artifacts;
   productsFile: string;
   verifierFile: string;
+  deploymentIntent?: GalileoDeploymentIntent;
+  deploymentIntentFile?: string;
   repoRoot?: string;
 }) {
   const repoRoot = input.repoRoot || repositoryRoot();
@@ -323,6 +562,7 @@ export async function collectUnsignedReleaseReviewRequest(input: {
   const source = loadCurrentCleanSourceEvidence(repoRoot);
   const products = loadProducts(input.productsFile, { requireApproved: false });
   const verifierConfig = loadVerifierConfig(input.verifierFile);
+  const deploymentIntent = resolveDeploymentIntent(input);
   const build = await collectReleaseBuildEvidence(input.artifacts);
   const buildEvidenceSha256 = releaseBuildEvidenceSha256(build);
   const productConfigSha256 = sha256File(input.productsFile);
@@ -335,6 +575,7 @@ export async function collectUnsignedReleaseReviewRequest(input: {
     productConfigSha256,
     verifierConfigSha256,
     verifierConfig,
+    deploymentIntent,
   });
   const blockers = [
     ...(policy.status !== ACTIVE_GALILEO_RELEASE_POLICY_STATUS
@@ -356,6 +597,7 @@ export async function collectUnsignedReleaseReviewRequest(input: {
     types: RELEASE_ATTESTATION_TYPES,
     primaryType: 'ReleaseAttestation',
     payload,
+    deploymentIntent,
     digest: releaseAttestationDigest(policy, payload),
     acceptedAttestation: false,
   };
@@ -377,6 +619,8 @@ export async function collectAndVerifyReleaseEvidence(input: {
   verifierFile: string;
   attestation?: SignedReleaseAttestation;
   attestationFile?: string;
+  deploymentIntent?: GalileoDeploymentIntent;
+  deploymentIntentFile?: string;
   repoRoot?: string;
 }): Promise<VerifiedReleaseEvidence> {
   const repoRoot = input.repoRoot || repositoryRoot();
@@ -395,6 +639,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
   );
   const products = loadProducts(input.productsFile);
   const verifierConfig = loadVerifierConfig(input.verifierFile);
+  const deploymentIntent = resolveDeploymentIntent(input);
   const build = await collectReleaseBuildEvidence(input.artifacts);
   const buildEvidenceSha256 = releaseBuildEvidenceSha256(build);
   const productConfigSha256 = sha256File(input.productsFile);
@@ -407,6 +652,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
     productConfigSha256,
     verifierConfigSha256,
     verifierConfig,
+    deploymentIntent,
   });
   const verified = verifySignedReleaseAttestation(policy, expectedPayload, attestation);
   return {
@@ -421,6 +667,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
     productConfigSha256,
     verifierConfig,
     verifierConfigSha256,
+    deploymentIntent,
   };
 }
 
@@ -438,6 +685,7 @@ export function assertSameVerifiedReleaseEvidence(
     ['build evidence SHA-256', preflight.buildEvidenceSha256, postflight.buildEvidenceSha256],
     ['product config SHA-256', preflight.productConfigSha256, postflight.productConfigSha256],
     ['verifier config SHA-256', preflight.verifierConfigSha256, postflight.verifierConfigSha256],
+    ['deployment intent ID', preflight.deploymentIntent.deploymentId, postflight.deploymentIntent.deploymentId],
   ] as const) {
     if (before.toLowerCase() !== after.toLowerCase()) {
       throw new Error(`post-deploy provenance drift: ${label} changed`);

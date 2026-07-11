@@ -101,6 +101,22 @@ export type RuntimeDeploymentEvidence = {
   runtimeCodeHash: string;
 };
 
+export type ContractCreationEvidence = {
+  address: string;
+  transactionHash: string;
+  transactionNonce: number;
+  blockNumber: number;
+  blockHash: string;
+  deployer: string;
+};
+
+export type ProxyDeploymentProvenance = {
+  proxy: ContractCreationEvidence;
+  implementation: ContractCreationEvidence;
+  admin: ContractCreationEvidence;
+  adminOwner: string;
+};
+
 export type VerifierPublicKeyPoint = {
   x: string;
   y: string;
@@ -573,6 +589,95 @@ export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise
 }
 
 export const releaseBuildEvidenceSha256 = (build: ReleaseBuildEvidence): string => deterministicSha256(build);
+
+export function assertFreshOpenZeppelinManifestAbsent(
+  repoRoot: string,
+  chainId: number,
+  manifestFile = `.openzeppelin/unknown-${chainId}.json`
+): void {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('OpenZeppelin manifest chain ID is invalid');
+  const manifestDir = path.resolve(repoRoot, '.openzeppelin');
+  const candidates = new Set([
+    path.resolve(repoRoot, manifestFile),
+    path.resolve(manifestDir, `unknown-${chainId}.json`),
+  ]);
+  for (const candidate of candidates) {
+    const relative = path.relative(manifestDir, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('OpenZeppelin manifest path escapes the repository manifest directory');
+    }
+    if (fs.existsSync(candidate)) {
+      throw new Error(`fresh deployment requires absent OpenZeppelin network manifest: ${candidate}`);
+    }
+  }
+}
+
+export async function collectContractCreationEvidence(
+  provider: providers.Provider,
+  address: string,
+  transactionHash: string,
+  expectedDeployer: string,
+  label: string,
+  minimumNonce = 0
+): Promise<ContractCreationEvidence> {
+  const expectedAddress = utils.getAddress(address);
+  const deployer = utils.getAddress(expectedDeployer);
+  if (!utils.isHexString(transactionHash, 32)) throw new Error(`${label} creation transaction hash is invalid`);
+  const transaction = await provider.getTransaction(transactionHash);
+  if (!transaction) throw new Error(`${label} creation transaction is unavailable`);
+  if (transaction.to !== null) throw new Error(`${label} provenance is not a contract-creation transaction`);
+  if (utils.getAddress(transaction.from) !== deployer) throw new Error(`${label} creation deployer mismatch`);
+  if (!Number.isSafeInteger(transaction.nonce) || transaction.nonce < minimumNonce) {
+    throw new Error(`${label} creation nonce predates the signed deployment intent`);
+  }
+  const receipt = await provider.getTransactionReceipt(transactionHash);
+  if (!receipt || receipt.status !== 1) throw new Error(`${label} creation transaction did not succeed`);
+  if (!receipt.contractAddress || utils.getAddress(receipt.contractAddress) !== expectedAddress) {
+    throw new Error(`${label} creation receipt contract address mismatch`);
+  }
+  if ((await provider.getCode(expectedAddress)) === '0x') throw new Error(`${label} creation address has no bytecode`);
+  return {
+    address: expectedAddress,
+    transactionHash: transaction.hash,
+    transactionNonce: transaction.nonce,
+    blockNumber: receipt.blockNumber,
+    blockHash: receipt.blockHash,
+    deployer,
+  };
+}
+
+export async function verifyContractCreationEvidence(
+  provider: providers.Provider,
+  recorded: ContractCreationEvidence,
+  expectedAddress: string,
+  expectedDeployer: string,
+  label: string,
+  minimumNonce = 0
+): Promise<void> {
+  const actual = await collectContractCreationEvidence(
+    provider,
+    expectedAddress,
+    recorded.transactionHash,
+    expectedDeployer,
+    label,
+    minimumNonce
+  );
+  if (deterministicSha256(actual) !== deterministicSha256(recorded)) {
+    throw new Error(`${label} creation transaction/block provenance mismatch`);
+  }
+}
+
+export async function verifyProxyAdminOwner(
+  provider: providers.Provider,
+  adminAddress: string,
+  expectedOwner: string,
+  label = 'ProxyAdmin'
+): Promise<string> {
+  const admin = new Contract(adminAddress, ['function owner() view returns (address)'], provider);
+  const owner = utils.getAddress(await admin.owner());
+  if (owner !== utils.getAddress(expectedOwner)) throw new Error(`${label} owner mismatch`);
+  return owner;
+}
 
 function git(repoRoot: string, args: string[]): string {
   return execFileSync('git', args, {

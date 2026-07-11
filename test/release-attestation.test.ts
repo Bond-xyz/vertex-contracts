@@ -1,9 +1,12 @@
 import { expect } from 'chai';
 import { artifacts } from 'hardhat';
-import { Wallet } from 'ethers';
+import { constants, Wallet } from 'ethers';
 import {
+  assertDeploymentIntentAvailableForFirstTransaction,
   assertIndependentReleaseReviewer,
+  assertManifestOperatorsMatchSignedIntent,
   assertSameVerifiedReleaseEvidence,
+  createGalileoDeploymentIntent,
   createReleaseAttestationPayload,
   executeAfterVerifiedPreflight,
   GalileoReleasePolicy,
@@ -46,6 +49,8 @@ function fixturePolicy(reviewer: Wallet): GalileoReleasePolicy {
     schemaVersion: 1,
     policyId: 'fixture-galileo-release',
     policyVersion: 7,
+    projectId: 'g-bond',
+    releaseId: 'bond-perpdex-galileo-audited-base',
     attestationDomain: { name: 'Bond PerpDex Galileo Release', version: '1' },
     chainId: 16602,
     collateral: {
@@ -61,6 +66,15 @@ function fixturePolicy(reviewer: Wallet): GalileoReleasePolicy {
 }
 
 function fixturePayload(policy: GalileoReleasePolicy) {
+  const deployer = Wallet.createRandom();
+  const sequencer = Wallet.createRandom();
+  const deploymentIntent = createGalileoDeploymentIntent({
+    deploymentNonce: 9,
+    expiresAt: 2_000_000_000,
+    deployer: deployer.address,
+    sequencer: sequencer.address,
+    firstTransactionNonce: 17,
+  });
   return createReleaseAttestationPayload({
     policy,
     policySha256: HASH_A,
@@ -77,6 +91,7 @@ function fixturePayload(policy: GalileoReleasePolicy) {
         { x: '5', y: '6' },
       ],
     },
+    deploymentIntent,
   });
 }
 
@@ -178,6 +193,13 @@ describe('signed Galileo release attestation', () => {
       buildEvidenceSha256: HASH_B,
       productConfigSha256: HASH_C,
       verifierConfigSha256: HASH_D,
+      deploymentIntent: createGalileoDeploymentIntent({
+        deploymentNonce: 9,
+        expiresAt: 2_000_000_000,
+        deployer: Wallet.createRandom().address,
+        sequencer: Wallet.createRandom().address,
+        firstTransactionNonce: 17,
+      }),
     } as unknown as VerifiedReleaseEvidence;
     expect(() =>
       assertSameVerifiedReleaseEvidence(evidence, {
@@ -198,6 +220,90 @@ describe('signed Galileo release attestation', () => {
     expect(() => assertIndependentReleaseReviewer(sequencer, deployer, sequencer)).to.throw(
       'independent from the sequencer'
     );
+  });
+
+  it('binds a single-use deployment nonce, expiry, deployer, sequencer, and expected first contract', async () => {
+    const reviewer = Wallet.createRandom();
+    const { policy, payload, attestation } = await signedFixture(reviewer);
+    const deploymentIntent = createGalileoDeploymentIntent({
+      deploymentNonce: payload.deploymentNonce,
+      expiresAt: payload.expiresAt,
+      deployer: payload.deployer,
+      sequencer: payload.sequencer,
+      firstTransactionNonce: payload.firstTransactionNonce,
+    });
+
+    // Signature verification remains repeatable for postflight and standalone historical verification.
+    expect(verifySignedReleaseAttestation(policy, payload, attestation).attestationDigest).to.equal(
+      verifySignedReleaseAttestation(policy, payload, attestation).attestationDigest
+    );
+    expect(() =>
+      assertDeploymentIntentAvailableForFirstTransaction(deploymentIntent, {
+        deployer: deploymentIntent.deployer,
+        sequencer: deploymentIntent.sequencer,
+        pendingNonce: deploymentIntent.firstTransactionNonce,
+        chainTimestamp: deploymentIntent.expiresAt - 1,
+        expectedFirstContractCode: '0x',
+      })
+    ).not.to.throw();
+    expect(() =>
+      assertDeploymentIntentAvailableForFirstTransaction(deploymentIntent, {
+        deployer: deploymentIntent.deployer,
+        sequencer: deploymentIntent.sequencer,
+        pendingNonce: deploymentIntent.firstTransactionNonce + 1,
+        chainTimestamp: deploymentIntent.expiresAt - 1,
+        expectedFirstContractCode: '0x',
+      })
+    ).to.throw('stale or already consumed');
+    expect(() =>
+      assertDeploymentIntentAvailableForFirstTransaction(deploymentIntent, {
+        deployer: deploymentIntent.deployer,
+        sequencer: deploymentIntent.sequencer,
+        pendingNonce: deploymentIntent.firstTransactionNonce,
+        chainTimestamp: deploymentIntent.expiresAt,
+        expectedFirstContractCode: '0x',
+      })
+    ).to.throw('expired');
+    expect(() =>
+      assertDeploymentIntentAvailableForFirstTransaction(deploymentIntent, {
+        deployer: deploymentIntent.deployer,
+        sequencer: deploymentIntent.sequencer,
+        pendingNonce: deploymentIntent.firstTransactionNonce,
+        chainTimestamp: deploymentIntent.expiresAt - 1,
+        expectedFirstContractCode: '0x01',
+      })
+    ).to.throw('already consumed');
+  });
+
+  it('rejects zero-address operators and rechecks reviewer independence during standalone verification', () => {
+    expect(() =>
+      createGalileoDeploymentIntent({
+        deploymentNonce: 1,
+        expiresAt: 2_000_000_000,
+        deployer: Wallet.createRandom().address,
+        sequencer: constants.AddressZero,
+        firstTransactionNonce: 0,
+      })
+    ).to.throw('sequencer must not be the zero address');
+
+    const reviewer = Wallet.createRandom();
+    const intent = createGalileoDeploymentIntent({
+      deploymentNonce: 1,
+      expiresAt: 2_000_000_000,
+      deployer: reviewer.address,
+      sequencer: Wallet.createRandom().address,
+      firstTransactionNonce: 0,
+    });
+    const evidence = {
+      reviewer: { name: 'Reviewer', address: reviewer.address },
+      deploymentIntent: intent,
+    } as unknown as VerifiedReleaseEvidence;
+    expect(() =>
+      assertManifestOperatorsMatchSignedIntent(evidence, {
+        deployer: intent.deployer,
+        sequencer: intent.sequencer,
+      })
+    ).to.throw('independent from the deployer');
   });
 
   it('rejects paired artifact/build-info, compiler, source, and settings tampering by deterministic recompilation', async () => {
