@@ -14,9 +14,14 @@ type ReviewMarket = {
   symbol: string;
   contractSizeIncrement: string;
   contractMinimumSize: string;
+  contractInitialPrice: string;
   rustSizeIncrement: string;
   rustMinimumSize: string;
-  status: string;
+  rustMinimumPrice: string;
+  rustMaximumPrice: string;
+  rustTickSize: string;
+  sizeStatus: string;
+  priceStatus: string;
 };
 
 type ProductApprovalReview = {
@@ -46,10 +51,16 @@ export type ProductReviewResult = {
     symbol: string;
     contractSizeIncrementX18: string;
     contractMinimumSizeX18: string;
+    contractInitialPriceX18: string;
     rustSizeIncrementRaw: string;
     rustMinimumSizeRaw: string;
     rustSizeIncrementX18: string;
     rustMinimumSizeX18: string;
+    rustMinimumPriceX18: string;
+    rustMaximumPriceX18: string;
+    rustTickSizeX18: string;
+    sizeMatch: boolean;
+    priceMatch: boolean;
     match: boolean;
   }>;
 };
@@ -151,11 +162,19 @@ export function validateProductApprovalReview(
       18,
       `${product.symbol} contract minimum size`
     );
+    const contractInitialPriceX18 = decimalToUnits(
+      reviewed.contractInitialPrice,
+      18,
+      `${product.symbol} contract initial price`
+    );
     if (contractSizeIncrementX18.toString() !== product.sizeIncrementX18) {
       throw new Error(`${product.symbol} review/config size increment drift`);
     }
     if (contractMinimumSizeX18.toString() !== product.minSizeX18) {
       throw new Error(`${product.symbol} review/config minimum size drift`);
+    }
+    if (contractInitialPriceX18.toString() !== product.risk.priceX18) {
+      throw new Error(`${product.symbol} review/config initial price drift`);
     }
     const rustSizeIncrementRaw = decimalToUnits(
       reviewed.rustSizeIncrement,
@@ -170,24 +189,50 @@ export function validateProductApprovalReview(
     const rustToContractScale = 10n ** BigInt(18 - review.rustSource.baseDecimals);
     const rustSizeIncrementX18 = rustSizeIncrementRaw * rustToContractScale;
     const rustMinimumSizeX18 = rustMinimumSizeRaw * rustToContractScale;
-    const match = rustSizeIncrementX18 === contractSizeIncrementX18 && rustMinimumSizeX18 === contractMinimumSizeX18;
-    if (!match) {
+    const sizeMatch =
+      rustSizeIncrementX18 === contractSizeIncrementX18 && rustMinimumSizeX18 === contractMinimumSizeX18;
+    if (!sizeMatch) {
       blockers.push(
         `${product.symbol} contract step/minimum are ${reviewed.contractSizeIncrement}/${reviewed.contractMinimumSize} while Rust step/minimum are ${reviewed.rustSizeIncrement}/${reviewed.rustMinimumSize}; align Rust and frontend metadata to the approved contract values before release approval`
       );
     }
-    if (reviewed.status !== (match ? 'match' : 'blocked_mismatch')) {
-      throw new Error(`${product.symbol} stored review status does not match computed vector result`);
+    if (reviewed.sizeStatus !== (sizeMatch ? 'match' : 'blocked_mismatch')) {
+      throw new Error(`${product.symbol} stored size review status does not match computed vector result`);
     }
+    const rustMinimumPriceX18 = decimalToUnits(reviewed.rustMinimumPrice, 18, `${product.symbol} Rust minimum price`);
+    const rustMaximumPriceX18 = decimalToUnits(reviewed.rustMaximumPrice, 18, `${product.symbol} Rust maximum price`);
+    const rustTickSizeX18 = decimalToUnits(reviewed.rustTickSize, 18, `${product.symbol} Rust price tick`);
+    if (rustMinimumPriceX18 <= 0n || rustMaximumPriceX18 < rustMinimumPriceX18 || rustTickSizeX18 <= 0n) {
+      throw new Error(`${product.symbol} Rust price bounds are invalid`);
+    }
+    const priceMatch =
+      contractInitialPriceX18 >= rustMinimumPriceX18 &&
+      contractInitialPriceX18 <= rustMaximumPriceX18 &&
+      contractInitialPriceX18 % rustTickSizeX18 === 0n;
+    if (!priceMatch) {
+      blockers.push(
+        `${product.symbol} contract initial price ${reviewed.contractInitialPrice} is outside Rust price range ${reviewed.rustMinimumPrice}-${reviewed.rustMaximumPrice}; align Rust and frontend price filters with the reviewed launch market before release approval`
+      );
+    }
+    if (reviewed.priceStatus !== (priceMatch ? 'match' : 'blocked_out_of_range')) {
+      throw new Error(`${product.symbol} stored price review status does not match computed vector result`);
+    }
+    const match = sizeMatch && priceMatch;
     return {
       productId: product.productId,
       symbol: product.symbol,
       contractSizeIncrementX18: contractSizeIncrementX18.toString(),
       contractMinimumSizeX18: contractMinimumSizeX18.toString(),
+      contractInitialPriceX18: contractInitialPriceX18.toString(),
       rustSizeIncrementRaw: rustSizeIncrementRaw.toString(),
       rustMinimumSizeRaw: rustMinimumSizeRaw.toString(),
       rustSizeIncrementX18: rustSizeIncrementX18.toString(),
       rustMinimumSizeX18: rustMinimumSizeX18.toString(),
+      rustMinimumPriceX18: rustMinimumPriceX18.toString(),
+      rustMaximumPriceX18: rustMaximumPriceX18.toString(),
+      rustTickSizeX18: rustTickSizeX18.toString(),
+      sizeMatch,
+      priceMatch,
       match,
     };
   });

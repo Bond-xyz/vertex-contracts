@@ -74,7 +74,7 @@ corepack yarn keys:galileo
 
 The deployment remains fail-closed until all tracked blockers are resolved in a reviewed candidate:
 
-1. Align Rust and frontend `0GUSDCPERP` step/minimum with the selected contract vector. The current review records contract `1 / 10` versus Rust `0.001 / 0.001` and therefore remains blocked.
+1. Align Rust and frontend market filters with the selected contract vectors. The current review records `0GUSDCPERP` contract step/minimum `1 / 10` versus Rust `0.001 / 0.001`; it also records contract launch prices `SOL = 150` and `0G = 1` outside the Rust minimum-price filters `556.80` and `39.86`. These copied price bounds would reject real launch orders and therefore remain blocked.
 2. Red confirms the exact four-market 20x vector in `config/galileo.product-approval-review.json`; then that artifact and `config/galileo.products.json` may set their approval fields true in the reviewed candidate.
 3. The Galileo-only policy changes to `approved_for_galileo_testnet_release`; mainnet external review remains required.
 4. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent agent-review evidence for the exact candidate.

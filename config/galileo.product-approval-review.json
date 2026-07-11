@@ -32,36 +32,56 @@
       "symbol": "BTCUSDCPERP",
       "contractSizeIncrement": "0.001",
       "contractMinimumSize": "0.001",
+      "contractInitialPrice": "100000",
       "rustSizeIncrement": "0.001",
       "rustMinimumSize": "0.001",
-      "status": "match"
+      "rustMinimumPrice": "556.80",
+      "rustMaximumPrice": "4529764",
+      "rustTickSize": "0.10",
+      "sizeStatus": "match",
+      "priceStatus": "match"
     },
     {
       "productId": 4,
       "symbol": "ETHUSDCPERP",
       "contractSizeIncrement": "0.001",
       "contractMinimumSize": "0.01",
+      "contractInitialPrice": "3000",
       "rustSizeIncrement": "0.001",
       "rustMinimumSize": "0.01",
-      "status": "match"
+      "rustMinimumPrice": "39.86",
+      "rustMaximumPrice": "306177",
+      "rustTickSize": "0.01",
+      "sizeStatus": "match",
+      "priceStatus": "match"
     },
     {
       "productId": 6,
       "symbol": "SOLUSDCPERP",
       "contractSizeIncrement": "0.01",
       "contractMinimumSize": "0.1",
+      "contractInitialPrice": "150",
       "rustSizeIncrement": "0.01",
       "rustMinimumSize": "0.1",
-      "status": "match"
+      "rustMinimumPrice": "556.80",
+      "rustMaximumPrice": "4529764",
+      "rustTickSize": "0.01",
+      "sizeStatus": "match",
+      "priceStatus": "blocked_out_of_range"
     },
     {
       "productId": 8,
       "symbol": "0GUSDCPERP",
       "contractSizeIncrement": "1",
       "contractMinimumSize": "10",
+      "contractInitialPrice": "1",
       "rustSizeIncrement": "0.001",
       "rustMinimumSize": "0.001",
-      "status": "blocked_mismatch"
+      "rustMinimumPrice": "39.86",
+      "rustMaximumPrice": "306177",
+      "rustTickSize": "0.01",
+      "sizeStatus": "blocked_mismatch",
+      "priceStatus": "blocked_out_of_range"
     }
   ],
   "checks": {
@@ -70,10 +90,14 @@
     "btcMarketUnits": "pass",
     "ethMarketUnits": "pass",
     "solMarketUnits": "pass",
-    "zeroGMarketUnits": "blocked_mismatch"
+    "solPriceBounds": "blocked_out_of_range",
+    "zeroGMarketUnits": "blocked_mismatch",
+    "zeroGPriceBounds": "blocked_out_of_range"
   },
   "blockers": [
-    "0GUSDCPERP contract step/minimum are 1/10 while Rust step/minimum are 0.001/0.001; align Rust and frontend metadata to the approved contract values before release approval"
+    "SOLUSDCPERP contract initial price 150 is outside Rust price range 556.80-4529764; align Rust and frontend price filters with the reviewed launch market before release approval",
+    "0GUSDCPERP contract step/minimum are 1/10 while Rust step/minimum are 0.001/0.001; align Rust and frontend metadata to the approved contract values before release approval",
+    "0GUSDCPERP contract initial price 1 is outside Rust price range 39.86-306177; align Rust and frontend price filters with the reviewed launch market before release approval"
   ],
   "approval": {
     "approved": false,

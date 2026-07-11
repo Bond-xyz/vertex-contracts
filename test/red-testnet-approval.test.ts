@@ -46,11 +46,16 @@ describe('tracked Red Galileo testnet approval', () => {
     );
   });
 
-  it('records the current 0G Rust/contract size mismatch as a release blocker', () => {
+  it('records every current Rust/contract market-vector mismatch as a release blocker', () => {
     const result = validateProductApprovalReview();
     expect(result.ready).to.equal(false);
     expect(result.blockers.some((blocker) => blocker.includes('0GUSDCPERP'))).to.equal(true);
-    expect(result.marketVectors.find((market) => market.productId === 8)?.match).to.equal(false);
+    const sol = result.marketVectors.find((market) => market.productId === 6);
+    const zeroG = result.marketVectors.find((market) => market.productId === 8);
+    expect(sol?.sizeMatch).to.equal(true);
+    expect(sol?.priceMatch).to.equal(false);
+    expect(zeroG?.sizeMatch).to.equal(false);
+    expect(zeroG?.priceMatch).to.equal(false);
   });
 
   it('rejects post-approval provenance drift', () => {
