@@ -39,33 +39,30 @@ contract Verifier is EIP712Upgradeable, OwnableUpgradeable, IVerifier, Version {
         );
     }
 
-    function assignPubKey(
-        uint256 i,
-        uint256 x,
-        uint256 y
-    ) public onlyOwner {
+    function assignPubKey(uint256 i, uint256 x, uint256 y) public onlyOwner {
         _assignPubkey(i, x, y);
     }
 
-    function _assignPubkey(
-        uint256 i,
-        uint256 x,
-        uint256 y
-    ) internal {
+    function _assignPubkey(uint256 i, uint256 x, uint256 y) internal {
         require(i < 8);
-        if (isPointNone(pubkeys[i])) {
+        bool previousIsNone = isPointNone(pubkeys[i]);
+        Point memory next = Point(x, y);
+        bool nextIsNone = isPointNone(next);
+        if (previousIsNone && !nextIsNone) {
             nSigner += 1;
+        } else if (!previousIsNone && nextIsNone) {
+            nSigner -= 1;
         }
-        pubkeys[i] = Point(x, y);
+        pubkeys[i] = next;
         for (uint256 s = (1 << i); s < 256; s = (s + 1) | (1 << i)) {
             isAggregatePubkeyLatest[s] = false;
         }
     }
 
     function deletePubkey(uint256 index) public onlyOwner {
+        require(index < 8);
         if (!isPointNone(pubkeys[index])) {
-            nSigner -= 1;
-            delete pubkeys[index];
+            _assignPubkey(index, 0, 0);
         }
     }
 
@@ -73,10 +70,13 @@ contract Verifier is EIP712Upgradeable, OwnableUpgradeable, IVerifier, Version {
         return pubkeys[index];
     }
 
-    function getAggregatePubkey(uint8 signerBitmask)
-        internal
-        returns (Point memory)
-    {
+    function getSignerCount() external view returns (uint256) {
+        return nSigner;
+    }
+
+    function getAggregatePubkey(
+        uint8 signerBitmask
+    ) internal returns (Point memory) {
         if (signerBitmask == 0 || isAggregatePubkeyLatest[signerBitmask])
             return aggregatePubkey[signerBitmask];
         Point memory res;
@@ -188,11 +188,10 @@ contract Verifier is EIP712Upgradeable, OwnableUpgradeable, IVerifier, Version {
         return u.x == 0 && u.y == 0;
     }
 
-    function pointAdd(Point memory u, Point memory v)
-        internal
-        pure
-        returns (Point memory)
-    {
+    function pointAdd(
+        Point memory u,
+        Point memory v
+    ) internal pure returns (Point memory) {
         if (isPointNone(u)) return v;
         if (isPointNone(v)) return u;
         uint256 lam = 0;

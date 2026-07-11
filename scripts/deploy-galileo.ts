@@ -9,7 +9,7 @@ import {
   GALILEO_USDCE_SYMBOL,
   initialPrices,
   loadProducts,
-  loadVerifierPoints,
+  loadVerifierConfig,
   requireGalileoUsdce,
 } from './deployment-config';
 import {
@@ -20,13 +20,15 @@ import {
   normalizeVerifierPublicKeys,
   ReleaseArtifactKey,
   ReleaseBuildEvidence,
+  releaseBuildEvidenceSha256,
   repositoryRoot,
-  sha256File,
+  requireReviewedSha256,
   verifyActiveClearinghouseLiq,
   verifyConfigFileSha256,
+  verifyLiveMarketConfiguration,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
-  verifyVerifierPublicKeys,
+  verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
 
@@ -86,6 +88,41 @@ async function main() {
     process.env.PERPDEX_REVIEWED_SOURCE_TREE
   );
   const reviewedBuild = await collectReleaseBuildEvidence(artifacts);
+  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
+  const verifierFile = path.resolve(
+    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
+  );
+  const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
+
+  const expectedBuildEvidenceSha256 = requireReviewedSha256(
+    process.env.PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256,
+    'PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256'
+  );
+  const expectedProductConfigSha256 = requireReviewedSha256(
+    process.env.PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256,
+    'PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256'
+  );
+  const expectedVerifierConfigSha256 = requireReviewedSha256(
+    process.env.PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256,
+    'PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256'
+  );
+  const actualBuildEvidenceSha256 = releaseBuildEvidenceSha256(reviewedBuild);
+  if (actualBuildEvidenceSha256 !== expectedBuildEvidenceSha256) {
+    throw new Error(
+      `reviewed build evidence SHA-256 mismatch: expected ${expectedBuildEvidenceSha256}, got ${actualBuildEvidenceSha256}`
+    );
+  }
+  const productConfigSha256 = verifyConfigFileSha256(productsFile, expectedProductConfigSha256, 'product config');
+  const verifierPublicKeysSha256 = verifyConfigFileSha256(
+    verifierFile,
+    expectedVerifierConfigSha256,
+    'verifier public-key config'
+  );
+  const products = loadProducts(productsFile);
+  const verifierConfig = loadVerifierConfig(verifierFile);
+  const verifierPoints = verifierConfig.keys;
+
+  // All reviewer-pinned local evidence is checked above before any signer is loaded or transaction is sent.
   const network = await ethers.provider.getNetwork();
   if (network.chainId !== GALILEO_CHAIN_ID) {
     throw new Error(`refusing deployment: expected chain ${GALILEO_CHAIN_ID}, got ${network.chainId}`);
@@ -97,18 +134,6 @@ async function main() {
     'PERPDEX_SEQUENCER_ADDRESS'
   );
   const quote = requireGalileoUsdce(process.env.PERPDEX_QUOTE_TOKEN_ADDRESS);
-  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
-  const verifierFile = path.resolve(
-    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
-  );
-  const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
-
-  const productConfigSha256 = sha256File(productsFile);
-  const verifierPublicKeysSha256 = sha256File(verifierFile);
-  const products = loadProducts(productsFile);
-  const verifierPoints = loadVerifierPoints(verifierFile);
-  verifyConfigFileSha256(productsFile, productConfigSha256, 'product config');
-  verifyConfigFileSha256(verifierFile, verifierPublicKeysSha256, 'verifier public-key config');
   const quoteCode = await ethers.provider.getCode(quote);
   if (quoteCode === '0x') throw new Error('canonical quote token has no bytecode');
   const quoteContract = new Contract(
@@ -143,7 +168,12 @@ async function main() {
     ...Array.from({ length: 5 }, () => ({ x: 0, y: 0 })),
   ]);
   await receipt(await verifier.initialize(paddedVerifierPoints));
-  await verifyVerifierPublicKeys(verifier, paddedVerifierPoints);
+  await verifyVerifierQuorumConfiguration(
+    verifier,
+    paddedVerifierPoints,
+    verifierPoints.length,
+    verifierConfig.signerBitmask
+  );
   await receipt(await clearinghouse.initialize(endpoint.address, quote, clearinghouseLiq.address, products.spreads));
   await receipt(await clearinghouse.addEngine(spotEngine.address, offchainExchange.address, 0));
   await receipt(await clearinghouse.addEngine(perpEngine.address, offchainExchange.address, 1));
@@ -209,6 +239,8 @@ async function main() {
     };
   }
 
+  await verifyLiveMarketConfiguration({ clearinghouse, spotEngine, perpEngine, offchainExchange }, products, quote);
+
   if ((await endpoint.getSequencer()) !== sequencer) {
     throw new Error('sequencer post-deploy verification failed');
   }
@@ -237,24 +269,34 @@ async function main() {
   const verifierRecord = {
     ...(await proxyRecord(verifier, 'verifier', reviewedBuild)),
     publicKeys: paddedVerifierPoints,
+    signerCount: verifierPoints.length,
+    signerBitmask: verifierConfig.signerBitmask,
   };
   const endpointRecord = await proxyRecord(endpoint, 'endpoint', reviewedBuild);
   const clearinghouseRecord = await proxyRecord(clearinghouse, 'clearinghouse', reviewedBuild);
   const spotEngineRecord = await proxyRecord(spotEngine, 'spotEngine', reviewedBuild);
   const perpEngineRecord = await proxyRecord(perpEngine, 'perpEngine', reviewedBuild);
   const offchainExchangeRecord = await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild);
-  verifyConfigFileSha256(productsFile, productConfigSha256, 'product config');
-  verifyConfigFileSha256(verifierFile, verifierPublicKeysSha256, 'verifier public-key config');
+  const postVerifyBuildSha256 = releaseBuildEvidenceSha256(await collectReleaseBuildEvidence(artifacts));
+  if (postVerifyBuildSha256 !== expectedBuildEvidenceSha256) {
+    throw new Error(
+      `post-deploy build evidence SHA-256 mismatch: expected ${expectedBuildEvidenceSha256}, got ${postVerifyBuildSha256}`
+    );
+  }
+  verifyConfigFileSha256(productsFile, expectedProductConfigSha256, 'post-deploy product config');
+  verifyConfigFileSha256(verifierFile, expectedVerifierConfigSha256, 'post-deploy verifier public-key config');
 
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     release: 'bond-perpdex-galileo-audited-base',
     source: {
       auditedBaseCommit: AUDITED_BASE_COMMIT,
       reviewedReleaseCommit: reviewedSource.releaseCommit,
       reviewedSourceTree: reviewedSource.sourceTree,
       compiler: reviewedBuild.compiler,
+      buildInfos: reviewedBuild.buildInfos,
       artifacts: reviewedBuild.artifacts,
+      buildEvidenceSha256: actualBuildEvidenceSha256,
       artifactRuntimeHashes: Object.fromEntries(
         Object.entries(reviewedBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
       ),
@@ -301,6 +343,9 @@ async function main() {
       updatePerpBalanceAbsent: true,
       slowModeExitPreserved: true,
       productRiskConfigApproved: true,
+      reviewerPinnedBuildAndConfigHashes: true,
+      exactVerifierSignerCountAndBitmask: true,
+      exactLiveMarketConfiguration: true,
       exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
       collateralTokenDeploymentAbsent: true,
     },

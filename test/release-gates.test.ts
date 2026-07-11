@@ -7,19 +7,25 @@ import path from 'path';
 import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
 import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
 import {
+  assertArtifactMatchesBuildInfo,
   assertRuntimeSizeBudget,
   collectReleaseBuildEvidence,
+  deterministicSha256,
   ENDPOINT_RUNTIME_BUDGET_BYTES,
   EIP170_MAX_RUNTIME_BYTES,
   inspectProxyDeployment,
   normalizeVerifierPublicKeys,
   RELEASE_ARTIFACTS,
+  releaseBuildEvidenceSha256,
+  requireReviewedSha256,
   sha256File,
   verifyActiveClearinghouseLiq,
   verifyConfigFileSha256,
+  verifyLiveMarketConfiguration,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
   verifyVerifierPublicKeys,
+  verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from '../scripts/release-evidence';
 
@@ -42,10 +48,11 @@ async function deployEndpointFixture(useTransferTaxToken?: boolean): Promise<{
   endpoint: Contract;
   token: Contract;
   clearinghouse: Contract;
+  verifier: Contract;
   sequencer: any;
   user: any;
 }> {
-  const [deployer, sequencer, user] = await ethers.getSigners();
+  const [, sequencer, user] = await ethers.getSigners();
   const Token = await ethers.getContractFactory(useTransferTaxToken ? 'TransferTaxMockERC20' : 'MockERC20');
   const token = useTransferTaxToken ? await Token.deploy() : await Token.deploy('Bond Test USD', 'USDC.e', 6);
   await token.deployed();
@@ -81,7 +88,7 @@ async function deployEndpointFixture(useTransferTaxToken?: boolean): Promise<{
   );
 
   await token.transfer(user.address, 10_000_000);
-  return { endpoint, token, clearinghouse, sequencer, user };
+  return { endpoint, token, clearinghouse, verifier, sequencer, user };
 }
 
 function signedBatchPayload(idx: number, transactions: string[]) {
@@ -97,7 +104,10 @@ describe('Galileo audited-base release gates', () => {
     const build = await collectReleaseBuildEvidence(artifacts);
     expect(build.compiler.solcVersion).to.equal('0.8.13');
     expect(build.compiler.settingsSha256).to.match(/^[0-9a-f]{64}$/);
+    expect(Object.values(build.buildInfos).map((entry) => entry.solcVersion)).to.have.members(['0.8.13', '0.8.9']);
+    expect(releaseBuildEvidenceSha256(build)).to.match(/^[0-9a-f]{64}$/);
     expect(build.artifacts.endpoint.fullyQualifiedName).to.equal(RELEASE_ARTIFACTS.endpoint);
+    expect(build.artifacts.endpoint.creationCodeHash).to.match(/^0x[0-9a-f]{64}$/);
     expect(build.artifacts.endpoint.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
     expect(build.artifacts.endpoint.runtimeByteLength).to.be.lessThan(ENDPOINT_RUNTIME_BUDGET_BYTES);
     expect(ENDPOINT_RUNTIME_BUDGET_BYTES).to.be.lessThan(EIP170_MAX_RUNTIME_BYTES);
@@ -110,6 +120,21 @@ describe('Galileo audited-base release gates', () => {
     ).to.throw('hard budget');
     expect(build.artifacts.transparentUpgradeableProxy.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
     expect(build.artifacts.proxyAdmin.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('rejects a one-byte artifact mutation against the matching solc build-info output', async () => {
+    const fullyQualifiedName = RELEASE_ARTIFACTS.endpoint;
+    const artifact = await artifacts.readArtifact(fullyQualifiedName);
+    const buildInfo = await artifacts.getBuildInfo(fullyQualifiedName);
+    if (!buildInfo) throw new Error(`missing test build info for ${fullyQualifiedName}`);
+    const output = buildInfo.output.contracts[artifact.sourceName][artifact.contractName];
+    expect(() => assertArtifactMatchesBuildInfo(artifact, output, fullyQualifiedName)).not.to.throw();
+
+    const firstByte = artifact.bytecode.slice(2, 4);
+    const tamperedBytecode = `0x${firstByte === '00' ? '01' : '00'}${artifact.bytecode.slice(4)}`;
+    expect(() =>
+      assertArtifactMatchesBuildInfo({ ...artifact, bytecode: tamperedBytecode }, output, fullyQualifiedName)
+    ).to.throw('artifact creation bytecode does not match solc build-info output');
   });
 
   it('recomputes product and verifier config hashes and rejects changed evidence', () => {
@@ -129,6 +154,9 @@ describe('Galileo audited-base release gates', () => {
       expect(() => verifyConfigFileSha256(verifierFile, 'ff'.repeat(32), 'verifier public-key config')).to.throw(
         'verifier public-key config SHA-256 mismatch'
       );
+      expect(requireReviewedSha256(verifierHash, 'reviewed verifier config')).to.equal(verifierHash);
+      expect(() => requireReviewedSha256(undefined, 'reviewed verifier config')).to.throw('reviewer-pinned');
+      expect(deterministicSha256({ b: 2, a: 1 })).to.equal(deterministicSha256({ a: 1, b: 2 }));
     } finally {
       fs.rmSync(tempDirectory, { recursive: true, force: true });
     }
@@ -183,6 +211,31 @@ describe('Galileo audited-base release gates', () => {
     const mutated = publicPoint(`0x${'55'.repeat(32)}`);
     await verifier.assignPubKey(7, mutated.x, mutated.y);
     await expectFailure(verifyVerifierPublicKeys(verifier, expected), 'verifier public key slot 7 mismatch');
+  });
+
+  it('keeps the effective signer count exact across zero/nonzero replacement and accepts bitmask 7', async () => {
+    const { endpoint, verifier, sequencer } = await deployEndpointFixture();
+    const expected = normalizeVerifierPublicKeys([
+      ...TEST_VERIFIER_KEYS.map(publicPoint),
+      ...Array.from({ length: 5 }, () => zeroPoint),
+    ]);
+    const first = expected[0];
+
+    // The prior implementation incremented nSigner on every restore but never decremented it on assignment to zero.
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      await verifier.assignPubKey(0, 0, 0);
+      await verifier.assignPubKey(0, first.x, first.y);
+    }
+    expect(await verifier.getSignerCount()).to.equal(3);
+    await verifyVerifierQuorumConfiguration(verifier, expected, 3, 7);
+
+    const updatePrice = utils.hexConcat([
+      '0x04',
+      utils.defaultAbiCoder.encode(['tuple(uint32 productId,int128 priceX18)'], [[2, utils.parseUnits('101000', 18)]]),
+    ]);
+    const signed = signedBatchPayload(0, [updatePrice]);
+    await endpoint.connect(sequencer).submitTransactionsChecked(0, [updatePrice], signed.e, signed.s);
+    expect(await endpoint.nSubmissions()).to.equal(1);
   });
 
   it('exposes only the quorum-signed batch ABI and enforces signer plus index', async () => {
@@ -373,6 +426,104 @@ describe('Galileo audited-base release gates', () => {
     );
   });
 
+  it('fails closed on every live product, risk, market-size, spread, and quote mismatch class', async () => {
+    const [quote, wrongQuote] = await ethers.getSigners();
+    const product = {
+      symbol: 'BTCUSDCPERP',
+      productId: 2,
+      sizeIncrementX18: utils.parseUnits('0.001', 18).toString(),
+      minSizeX18: utils.parseUnits('0.01', 18).toString(),
+      lpSpreadX18: utils.parseUnits('0.0001', 18).toString(),
+      risk: {
+        longWeightInitial: 950_000_000,
+        shortWeightInitial: 1_050_000_000,
+        longWeightMaintenance: 975_000_000,
+        shortWeightMaintenance: 1_025_000_000,
+        priceX18: utils.parseUnits('100000', 18).toString(),
+      },
+    };
+    const reviewedConfig = { spreads: '17', products: [product] };
+    const risk = () => ({
+      longWeightInitialX18: BigNumber.from(product.risk.longWeightInitial).mul(1_000_000_000),
+      shortWeightInitialX18: BigNumber.from(product.risk.shortWeightInitial).mul(1_000_000_000),
+      longWeightMaintenanceX18: BigNumber.from(product.risk.longWeightMaintenance).mul(1_000_000_000),
+      shortWeightMaintenanceX18: BigNumber.from(product.risk.shortWeightMaintenance).mul(1_000_000_000),
+      priceX18: product.risk.priceX18,
+    });
+    const live = () => ({
+      clearinghouse: {
+        getSpreads: async () => reviewedConfig.spreads,
+        getQuote: async () => quote.address,
+      },
+      spotEngine: {
+        'getProductIds()': async () => [0],
+        getToken: async () => quote.address,
+      },
+      perpEngine: {
+        'getProductIds()': async () => [product.productId],
+        getRisk: async () => risk(),
+      },
+      offchainExchange: {
+        getSizeIncrement: async () => product.sizeIncrementX18,
+        getMinSize: async () => product.minSizeX18,
+        getLpParams: async () => ({ lpSpreadX18: product.lpSpreadX18 }),
+      },
+    });
+
+    await verifyLiveMarketConfiguration(live(), reviewedConfig, quote.address);
+
+    const wrongProductSet = live();
+    wrongProductSet.perpEngine['getProductIds()'] = async () => [2, 4];
+    await expectFailure(
+      verifyLiveMarketConfiguration(wrongProductSet, reviewedConfig, quote.address),
+      'perp-engine product ID set mismatch'
+    );
+
+    const wrongRisk = live();
+    wrongRisk.perpEngine.getRisk = async () => ({
+      ...risk(),
+      priceX18: BigNumber.from(product.risk.priceX18).add(1),
+    });
+    await expectFailure(
+      verifyLiveMarketConfiguration(wrongRisk, reviewedConfig, quote.address),
+      'risk.priceX18 mismatch'
+    );
+
+    for (const [method, message] of [
+      ['getSizeIncrement', 'size increment mismatch'],
+      ['getMinSize', 'min size mismatch'],
+    ] as const) {
+      const wrongMarketSize = live();
+      wrongMarketSize.offchainExchange[method] = async () => 1;
+      await expectFailure(verifyLiveMarketConfiguration(wrongMarketSize, reviewedConfig, quote.address), message);
+    }
+
+    const wrongLp = live();
+    wrongLp.offchainExchange.getLpParams = async () => ({ lpSpreadX18: 1 });
+    await expectFailure(verifyLiveMarketConfiguration(wrongLp, reviewedConfig, quote.address), 'LP spread mismatch');
+
+    const wrongSpreads = live();
+    wrongSpreads.clearinghouse.getSpreads = async () => 18;
+    await expectFailure(
+      verifyLiveMarketConfiguration(wrongSpreads, reviewedConfig, quote.address),
+      'clearinghouse spreads mismatch'
+    );
+
+    const wrongClearinghouseQuote = live();
+    wrongClearinghouseQuote.clearinghouse.getQuote = async () => wrongQuote.address;
+    await expectFailure(
+      verifyLiveMarketConfiguration(wrongClearinghouseQuote, reviewedConfig, quote.address),
+      'clearinghouse quote token mismatch'
+    );
+
+    const wrongSpotQuote = live();
+    wrongSpotQuote.spotEngine.getToken = async () => wrongQuote.address;
+    await expectFailure(
+      verifyLiveMarketConfiguration(wrongSpotQuote, reviewedConfig, quote.address),
+      'spot-engine product 0 token mismatch'
+    );
+  });
+
   it('fresh-deploys and wires the full audited contract graph without old proxies', async () => {
     const [deployer, sequencer, user] = await ethers.getSigners();
     const deployShell = async (name: string, unsafeAllow: 'delegatecall'[] = []) => {
@@ -431,7 +582,7 @@ describe('Galileo audited-base release gates', () => {
       zeroPoint,
     ]);
     await verifier.initialize(verifierPublicKeys);
-    await verifyVerifierPublicKeys(verifier, verifierPublicKeys);
+    await verifyVerifierQuorumConfiguration(verifier, verifierPublicKeys, 3, 7);
     await clearinghouse.initialize(endpoint.address, token.address, liq.address, 0);
     const clearinghouseLiqRuntimeCodeHash = await verifyRuntimeArtifact(
       ethers.provider,
@@ -481,6 +632,29 @@ describe('Galileo audited-base release gates', () => {
       shortWeightMaintenance: 1_025_000_000,
       priceX18: utils.parseUnits('100000', 18),
     });
+    await verifyLiveMarketConfiguration(
+      { clearinghouse, spotEngine: spot, perpEngine: perp, offchainExchange: exchange },
+      {
+        spreads: '0',
+        products: [
+          {
+            symbol: 'BTCUSDCPERP',
+            productId: 2,
+            sizeIncrementX18: utils.parseUnits('0.001', 18).toString(),
+            minSizeX18: utils.parseUnits('0.001', 18).toString(),
+            lpSpreadX18: '0',
+            risk: {
+              longWeightInitial: 950_000_000,
+              shortWeightInitial: 1_050_000_000,
+              longWeightMaintenance: 975_000_000,
+              shortWeightMaintenance: 1_025_000_000,
+              priceX18: utils.parseUnits('100000', 18).toString(),
+            },
+          },
+        ],
+      },
+      token.address
+    );
 
     expect(await endpoint.getSequencer()).to.equal(sequencer.address);
     expect(await clearinghouse.getEngineByType(0)).to.equal(spot.address);

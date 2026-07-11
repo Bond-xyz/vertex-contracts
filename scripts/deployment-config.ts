@@ -40,6 +40,12 @@ export type GalileoProducts = {
 
 export type VerifierPoint = { x: string; y: string };
 
+export type VerifierConfig = {
+  chainId: number;
+  signerBitmask: number;
+  keys: VerifierPoint[];
+};
+
 const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as T;
 
 const positive = (value: string, field: string): BigNumber => {
@@ -81,12 +87,8 @@ export function loadProducts(file: string): GalileoProducts {
   return config;
 }
 
-export function loadVerifierPoints(file: string): VerifierPoint[] {
-  const config = readJson<{
-    chainId: number;
-    signerBitmask: number;
-    keys: VerifierPoint[];
-  }>(file);
+export function loadVerifierConfig(file: string): VerifierConfig {
+  const config = readJson<VerifierConfig>(file);
   if (config.chainId !== GALILEO_CHAIN_ID || config.signerBitmask !== 7) {
     throw new Error(`verifier public-key file must target chain ${GALILEO_CHAIN_ID} and bitmask 7`);
   }
@@ -101,7 +103,11 @@ export function loadVerifierPoints(file: string): VerifierPoint[] {
       throw new Error(`verifier public key ${index} is not a secp256k1 point`);
     }
   }
-  return config.keys;
+  return config;
+}
+
+export function loadVerifierPoints(file: string): VerifierPoint[] {
+  return loadVerifierConfig(file).keys;
 }
 
 export function initialPrices(products: ProductConfig[]): string[] {

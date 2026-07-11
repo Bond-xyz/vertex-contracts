@@ -29,9 +29,19 @@ The deployer rejects any substitute address or token metadata and never deploys 
 
 ## Reviewed build provenance gate
 
-Deployment requires a clean checkout plus reviewer-pinned `PERPDEX_REVIEWED_RELEASE_COMMIT` and `PERPDEX_REVIEWED_SOURCE_TREE`. Obtain the two values with `git rev-parse HEAD` and `git rev-parse HEAD^{tree}` only after review, then copy them into the ignored local environment file. The deployment manifest records those values, the exact solc version and settings, and every reviewed artifact runtime hash.
+Deployment requires a clean checkout and five mandatory inputs supplied by an independent reviewer:
 
-Post-deploy verification re-derives the clean Git and artifact evidence, recomputes the product and verifier-public-key file hashes, reads each transparent proxy's EIP-1967 implementation and admin slots, and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. It also verifies the Clearinghouse's active liquidation delegate target and runtime, all eight live Verifier public-key slots including zero padding, and each VirtualBook's immutable product ID. CI rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
+- `PERPDEX_REVIEWED_RELEASE_COMMIT`
+- `PERPDEX_REVIEWED_SOURCE_TREE`
+- `PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256`
+- `PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256`
+- `PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256`
+
+After reviewing the exact clean commit, the reviewer—not the deployer—runs `corepack yarn evidence:galileo` with the reviewed product and public-key file paths. The reviewer transfers the resulting five values to the deployer for the ignored local environment file. The deployment script never derives an expected hash from the file it is validating: it checks all five reviewer-pinned values before loading a signer or sending any transaction, then recomputes the three SHA-256 values after deployment before writing the manifest. The standalone post-deploy verifier requires the same reviewer inputs and compares them to both the clean checkout and schema-v3 manifest.
+
+Build evidence byte-compares every application artifact's creation and runtime bytecode to its Hardhat solc build-info output and binds every build-info source input to the matching reviewed source-tree or installed dependency file. The release application remains compiled by exact solc `0.8.13`. OpenZeppelin upgrades-core deploys prebuilt `TransparentUpgradeableProxy` and `ProxyAdmin` artifacts originally compiled by exact solc `0.8.9`; the evidence collector deterministically recompiles the package's embedded build input with that exact compiler and requires byte-for-byte equality. Both compiler versions, full settings, input/output hashes, source hashes, creation hashes, and runtime hashes are included in the reviewer-pinned build-evidence digest.
+
+Post-deploy verification also reads each transparent proxy's EIP-1967 implementation and admin slots and compares proxy, implementation, and ProxyAdmin runtime bytecode to the reviewed artifact hashes. It verifies the Clearinghouse's active liquidation delegate target and runtime; all eight live Verifier public-key slots, the exact signer count, and signer bitmask `7`; every VirtualBook's immutable product ID; the exact Spot and Perp product-ID sets; every Perp risk weight and price; size increment, minimum size, and LP spread; Clearinghouse spreads; and the product-zero quote token. CI rejects Endpoint runtime bytecode at or above 24,560 bytes, before the 24,576-byte EIP-170 ceiling.
 
 ## Release gate
 
@@ -40,6 +50,8 @@ HUSKY=0 corepack yarn install --frozen-lockfile --ignore-engines
 corepack yarn force-compile
 corepack yarn test:release
 ```
+
+The release suite includes negative regressions for a one-byte artifact mutation, historical Verifier signer-count corruption, signed bitmask-`7` execution, and every live market/risk mismatch class.
 
 Generate three independent Galileo-only verifier keys without printing them:
 

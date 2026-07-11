@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { BigNumber, BigNumberish, Contract, providers, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
+import proxySolc = require('solc-0.8.9');
+import type { GalileoProducts } from './deployment-config';
 
 export const EIP170_MAX_RUNTIME_BYTES = 24_576;
 // Keep a small hard margin below EIP-170 so CI fails before an undeployable build.
@@ -42,6 +44,9 @@ export type ArtifactRuntimeEvidence = {
   contractName: string;
   sourceName: string;
   fullyQualifiedName: string;
+  buildInfoId: string;
+  creationByteLength: number;
+  creationCodeHash: string;
   runtimeByteLength: number;
   runtimeCodeHash: string;
   immutableReferences: Array<{ start: number; length: number }>;
@@ -54,8 +59,25 @@ export type CompilerEvidence = {
   settingsSha256: string;
 };
 
+export type BuildSourceEvidence = {
+  byteLength: number;
+  sha256: string;
+  binding: 'reviewed-source-tree' | 'installed-dependency' | 'bundled-upgrades-core-build-input';
+  file: string;
+};
+
+export type SolcBuildInfoEvidence = CompilerEvidence & {
+  buildInfoId: string;
+  inputSha256: string;
+  outputSha256: string;
+  provenanceFile: string;
+  provenanceFileSha256: string;
+  sources: Record<string, BuildSourceEvidence>;
+};
+
 export type ReleaseBuildEvidence = {
   compiler: CompilerEvidence;
+  buildInfos: Record<string, SolcBuildInfoEvidence>;
   artifacts: Record<string, ArtifactRuntimeEvidence>;
 };
 
@@ -91,13 +113,64 @@ type VerifierPublicKeyPointLike = {
 type ArtifactShape = {
   contractName: string;
   sourceName: string;
+  bytecode: string;
   deployedBytecode: string;
 };
 
-const sha256Json = (value: unknown): string => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+type SolcContractOutput = {
+  evm: {
+    bytecode: { object: string };
+    deployedBytecode: {
+      object: string;
+      immutableReferences?: Record<string, Array<{ start: number; length: number }>>;
+    };
+  };
+};
+
+type SolcBuildInfoShape = {
+  id?: string;
+  solcVersion?: string;
+  solcLongVersion: string;
+  input: {
+    settings: Record<string, unknown>;
+    sources: Record<string, { content?: string }>;
+  };
+  output?: {
+    contracts: Record<string, Record<string, SolcContractOutput>>;
+    errors?: Array<{ severity: string; formattedMessage?: string; message?: string }>;
+  };
+};
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalize(entry)])
+    );
+  }
+  return value;
+}
+
+export const deterministicSha256 = (value: unknown): string =>
+  crypto
+    .createHash('sha256')
+    .update(JSON.stringify(canonicalize(value)))
+    .digest('hex');
+
+const sha256Text = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
 export const sha256File = (file: string): string =>
   crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+export function requireReviewedSha256(value: string | undefined, label: string): string {
+  if (!value || !/^[0-9a-f]{64}$/i.test(value)) {
+    throw new Error(`${label} must be the reviewer-pinned 64-character SHA-256`);
+  }
+  return value.toLowerCase();
+}
 
 export function verifyConfigFileSha256(file: string, expected: string, label: string): string {
   if (!/^[0-9a-f]{64}$/i.test(expected)) {
@@ -170,6 +243,45 @@ export async function verifyVerifierPublicKeys(
   return actual;
 }
 
+export type VerifierQuorumEvidence = {
+  signerCount: number;
+  signerBitmask: number;
+  publicKeys: VerifierPublicKeyPoint[];
+};
+
+function signerMask(points: VerifierPublicKeyPoint[]): number {
+  return points.reduce((mask, point, index) => {
+    const nonzero = BigNumber.from(point.x).or(BigNumber.from(point.y)).isZero() === false;
+    return nonzero ? mask | (1 << index) : mask;
+  }, 0);
+}
+
+export async function readVerifierQuorumConfiguration(verifier: Contract): Promise<VerifierQuorumEvidence> {
+  const publicKeys = await readVerifierPublicKeys(verifier);
+  return {
+    signerCount: BigNumber.from(await verifier.getSignerCount()).toNumber(),
+    signerBitmask: signerMask(publicKeys),
+    publicKeys,
+  };
+}
+
+export async function verifyVerifierQuorumConfiguration(
+  verifier: Contract,
+  expectedPoints: VerifierPublicKeyPointLike[],
+  expectedSignerCount: number,
+  expectedSignerBitmask: number
+): Promise<VerifierQuorumEvidence> {
+  const actual = await readVerifierQuorumConfiguration(verifier);
+  assertVerifierPublicKeysMatch(actual.publicKeys, expectedPoints);
+  if (actual.signerCount !== expectedSignerCount) {
+    throw new Error(`verifier signer count mismatch: expected ${expectedSignerCount}, got ${actual.signerCount}`);
+  }
+  if (actual.signerBitmask !== expectedSignerBitmask) {
+    throw new Error(`verifier signer bitmask mismatch: expected ${expectedSignerBitmask}, got ${actual.signerBitmask}`);
+  }
+  return actual;
+}
+
 export function runtimeByteLength(deployedBytecode: string): number {
   if (!utils.isHexString(deployedBytecode) || deployedBytecode === '0x') {
     throw new Error('runtime bytecode must be non-empty hex');
@@ -195,43 +307,201 @@ export function assertRuntimeSizeBudget(label: string, deployedBytecode: string,
 function artifactEvidence(
   artifact: ArtifactShape,
   fullyQualifiedName: string,
+  buildInfoId: string,
   immutableReferences: Array<{ start: number; length: number }> = []
 ): ArtifactRuntimeEvidence {
   return {
     contractName: artifact.contractName,
     sourceName: artifact.sourceName,
     fullyQualifiedName,
+    buildInfoId,
+    creationByteLength: runtimeByteLength(artifact.bytecode),
+    creationCodeHash: runtimeCodeHash(artifact.bytecode),
     runtimeByteLength: runtimeByteLength(artifact.deployedBytecode),
     runtimeCodeHash: runtimeCodeHash(artifact.deployedBytecode),
     immutableReferences,
   };
 }
 
-function readOpenZeppelinArtifact(contractName: 'ProxyAdmin' | 'TransparentUpgradeableProxy') {
-  const source = `@openzeppelin/contracts/proxy/transparent/${contractName}.sol`;
-  const artifactPath = require.resolve(`@openzeppelin/upgrades-core/artifacts/${source}/${contractName}.json`);
-  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8')) as ArtifactShape;
-  return artifactEvidence(artifact, `${source}:${contractName}`);
+function prefixedBytecode(object: string, label: string): string {
+  if (!/^[0-9a-f]*$/i.test(object) || object.length === 0 || object.length % 2 !== 0) {
+    throw new Error(`${label} solc bytecode is not non-empty whole-byte hex`);
+  }
+  return `0x${object}`;
+}
+
+export function assertArtifactMatchesBuildInfo(
+  artifact: ArtifactShape,
+  output: SolcContractOutput,
+  fullyQualifiedName: string
+): void {
+  const creation = prefixedBytecode(output.evm.bytecode.object, `${fullyQualifiedName} creation`);
+  const runtime = prefixedBytecode(output.evm.deployedBytecode.object, `${fullyQualifiedName} runtime`);
+  if (artifact.bytecode.toLowerCase() !== creation.toLowerCase()) {
+    throw new Error(`${fullyQualifiedName} artifact creation bytecode does not match solc build-info output`);
+  }
+  if (artifact.deployedBytecode.toLowerCase() !== runtime.toLowerCase()) {
+    throw new Error(`${fullyQualifiedName} artifact runtime bytecode does not match solc build-info output`);
+  }
+}
+
+function sourceEvidenceFromFiles(
+  repoRoot: string,
+  sources: Record<string, { content?: string }>
+): Record<string, BuildSourceEvidence> {
+  return Object.fromEntries(
+    Object.entries(sources)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceName, source]) => {
+        if (typeof source.content !== 'string')
+          throw new Error(`build-info source ${sourceName} has no literal content`);
+        const reviewedFile = path.resolve(repoRoot, sourceName);
+        const dependencyFile = path.resolve(repoRoot, 'node_modules', sourceName);
+        const file = fs.existsSync(reviewedFile) ? reviewedFile : dependencyFile;
+        if (!fs.existsSync(file)) throw new Error(`build-info source ${sourceName} has no matching reviewed file`);
+        const fileContent = fs.readFileSync(file, 'utf8');
+        if (fileContent !== source.content) {
+          throw new Error(`build-info source ${sourceName} differs from ${path.relative(repoRoot, file)}`);
+        }
+        const relativeFile = path.relative(repoRoot, file);
+        return [
+          sourceName,
+          {
+            byteLength: Buffer.byteLength(source.content),
+            sha256: sha256Text(source.content),
+            binding: relativeFile.startsWith(`node_modules${path.sep}`)
+              ? 'installed-dependency'
+              : 'reviewed-source-tree',
+            file: relativeFile.split(path.sep).join('/'),
+          },
+        ];
+      })
+  );
+}
+
+function embeddedSourceEvidence(
+  sources: Record<string, { content?: string }>,
+  provenanceFile: string
+): Record<string, BuildSourceEvidence> {
+  return Object.fromEntries(
+    Object.entries(sources)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceName, source]) => {
+        if (typeof source.content !== 'string')
+          throw new Error(`proxy build source ${sourceName} has no literal content`);
+        return [
+          sourceName,
+          {
+            byteLength: Buffer.byteLength(source.content),
+            sha256: sha256Text(source.content),
+            binding: 'bundled-upgrades-core-build-input',
+            file: `${provenanceFile}#input.sources/${sourceName}`,
+          },
+        ];
+      })
+  );
+}
+
+function buildInfoEvidence(
+  buildInfoId: string,
+  buildInfo: SolcBuildInfoShape,
+  output: NonNullable<SolcBuildInfoShape['output']>,
+  provenanceFile: string,
+  provenanceFileSha256: string,
+  sources: Record<string, BuildSourceEvidence>
+): SolcBuildInfoEvidence {
+  const solcVersion = buildInfo.solcVersion || buildInfo.solcLongVersion.split('+')[0];
+  return {
+    buildInfoId,
+    solcVersion,
+    solcLongVersion: buildInfo.solcLongVersion,
+    settings: buildInfo.input.settings,
+    settingsSha256: deterministicSha256(buildInfo.input.settings),
+    inputSha256: deterministicSha256(buildInfo.input),
+    outputSha256: deterministicSha256(output),
+    provenanceFile,
+    provenanceFileSha256,
+    sources,
+  };
+}
+
+function collectOpenZeppelinProxyBuildEvidence(repoRoot: string): {
+  buildInfo: SolcBuildInfoEvidence;
+  artifacts: Record<string, ArtifactRuntimeEvidence>;
+} {
+  const buildInfoFile = require.resolve('@openzeppelin/upgrades-core/artifacts/build-info.json');
+  const packageBuildInfo = JSON.parse(fs.readFileSync(buildInfoFile, 'utf8')) as SolcBuildInfoShape;
+  const actualCompiler = proxySolc.version();
+  if (actualCompiler !== `${packageBuildInfo.solcLongVersion}.Emscripten.clang`) {
+    throw new Error(
+      `OpenZeppelin proxy compiler mismatch: expected ${packageBuildInfo.solcLongVersion}, got ${actualCompiler}`
+    );
+  }
+  const output = JSON.parse(proxySolc.compile(JSON.stringify(packageBuildInfo.input))) as NonNullable<
+    SolcBuildInfoShape['output']
+  >;
+  const compilerErrors = (output.errors || []).filter((error) => error.severity === 'error');
+  if (compilerErrors.length > 0) {
+    throw new Error(
+      `OpenZeppelin proxy build failed: ${compilerErrors
+        .map((error) => error.formattedMessage || error.message)
+        .join('\n')}`
+    );
+  }
+  const buildInfoId = 'openzeppelin-upgrades-core-proxies-solc-0.8.9';
+  const artifacts: Record<string, ArtifactRuntimeEvidence> = {};
+  for (const [key, contractName] of [
+    ['transparentUpgradeableProxy', 'TransparentUpgradeableProxy'],
+    ['proxyAdmin', 'ProxyAdmin'],
+  ] as const) {
+    const sourceName = `@openzeppelin/contracts/proxy/transparent/${contractName}.sol`;
+    const fullyQualifiedName = `${sourceName}:${contractName}`;
+    const artifactFile = require.resolve(`@openzeppelin/upgrades-core/artifacts/${sourceName}/${contractName}.json`);
+    const artifact = JSON.parse(fs.readFileSync(artifactFile, 'utf8')) as ArtifactShape;
+    const contractOutput = output.contracts?.[sourceName]?.[contractName];
+    if (!contractOutput) throw new Error(`recompiled proxy output is missing ${fullyQualifiedName}`);
+    assertArtifactMatchesBuildInfo(artifact, contractOutput, fullyQualifiedName);
+    const immutableReferences = Object.values(contractOutput.evm.deployedBytecode.immutableReferences || {}).flat();
+    artifacts[key] = artifactEvidence(artifact, fullyQualifiedName, buildInfoId, immutableReferences);
+  }
+  const provenanceFile = path.relative(repoRoot, buildInfoFile).split(path.sep).join('/');
+  return {
+    buildInfo: buildInfoEvidence(
+      buildInfoId,
+      packageBuildInfo,
+      output,
+      provenanceFile,
+      sha256File(buildInfoFile),
+      embeddedSourceEvidence(packageBuildInfo.input.sources, provenanceFile)
+    ),
+    artifacts,
+  };
 }
 
 export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise<ReleaseBuildEvidence> {
+  const repoRoot = repositoryRoot();
   const releaseArtifacts: Record<string, ArtifactRuntimeEvidence> = {};
   let compiler: CompilerEvidence | undefined;
+  const buildInfos: Record<string, SolcBuildInfoEvidence> = {};
 
   for (const [key, fullyQualifiedName] of Object.entries(RELEASE_ARTIFACTS)) {
-    const artifact = await artifacts.readArtifact(fullyQualifiedName);
-    const buildInfo = await artifacts.getBuildInfo(fullyQualifiedName);
+    const artifact = (await artifacts.readArtifact(fullyQualifiedName)) as ArtifactShape;
+    const buildInfo = (await artifacts.getBuildInfo(fullyQualifiedName)) as SolcBuildInfoShape | undefined;
     if (!buildInfo) throw new Error(`missing build info for ${fullyQualifiedName}`);
+    if (!buildInfo.output) throw new Error(`build info has no output for ${fullyQualifiedName}`);
+    const contractOutput = buildInfo.output.contracts?.[artifact.sourceName]?.[artifact.contractName];
+    if (!contractOutput) throw new Error(`build info output is missing ${fullyQualifiedName}`);
+    assertArtifactMatchesBuildInfo(artifact, contractOutput, fullyQualifiedName);
     const immutableReferences = Object.values(
-      buildInfo.output.contracts[artifact.sourceName][artifact.contractName].evm.deployedBytecode.immutableReferences ||
-        {}
+      contractOutput.evm.deployedBytecode.immutableReferences || {}
     ).flat() as Array<{ start: number; length: number }>;
-    releaseArtifacts[key] = artifactEvidence(artifact, fullyQualifiedName, immutableReferences);
+    const buildInfoId = `hardhat-${buildInfo.id || deterministicSha256(buildInfo.input)}`;
+    releaseArtifacts[key] = artifactEvidence(artifact, fullyQualifiedName, buildInfoId, immutableReferences);
     const candidate: CompilerEvidence = {
-      solcVersion: buildInfo.solcVersion,
+      solcVersion: buildInfo.solcVersion || buildInfo.solcLongVersion.split('+')[0],
       solcLongVersion: buildInfo.solcLongVersion,
       settings: buildInfo.input.settings as Record<string, unknown>,
-      settingsSha256: sha256Json(buildInfo.input.settings),
+      settingsSha256: deterministicSha256(buildInfo.input.settings),
     };
     if (!compiler) {
       compiler = candidate;
@@ -242,10 +512,25 @@ export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise
     ) {
       throw new Error(`release artifact compiler mismatch at ${fullyQualifiedName}`);
     }
+    if (!buildInfos[buildInfoId]) {
+      const generatedBuildInfoFile = path.resolve(repoRoot, 'artifacts', 'build-info', `${buildInfo.id}.json`);
+      if (!buildInfo.id || !fs.existsSync(generatedBuildInfoFile)) {
+        throw new Error(`generated build-info file is missing for ${fullyQualifiedName}`);
+      }
+      buildInfos[buildInfoId] = buildInfoEvidence(
+        buildInfoId,
+        buildInfo,
+        buildInfo.output,
+        path.relative(repoRoot, generatedBuildInfoFile).split(path.sep).join('/'),
+        sha256File(generatedBuildInfoFile),
+        sourceEvidenceFromFiles(repoRoot, buildInfo.input.sources)
+      );
+    }
   }
 
-  releaseArtifacts.transparentUpgradeableProxy = readOpenZeppelinArtifact('TransparentUpgradeableProxy');
-  releaseArtifacts.proxyAdmin = readOpenZeppelinArtifact('ProxyAdmin');
+  const proxyBuild = collectOpenZeppelinProxyBuildEvidence(repoRoot);
+  Object.assign(releaseArtifacts, proxyBuild.artifacts);
+  buildInfos[proxyBuild.buildInfo.buildInfoId] = proxyBuild.buildInfo;
 
   if (!compiler) throw new Error('release compiler evidence is empty');
   assertRuntimeSizeBudget(
@@ -253,8 +538,10 @@ export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise
     (await artifacts.readArtifact(RELEASE_ARTIFACTS.endpoint)).deployedBytecode,
     ENDPOINT_RUNTIME_BUDGET_BYTES
   );
-  return { compiler, artifacts: releaseArtifacts };
+  return { compiler, buildInfos, artifacts: releaseArtifacts };
 }
+
+export const releaseBuildEvidenceSha256 = (build: ReleaseBuildEvidence): string => deterministicSha256(build);
 
 function git(repoRoot: string, args: string[]): string {
   return execFileSync('git', args, {
@@ -395,6 +682,94 @@ export async function verifyVirtualBookProductId(
   }
 }
 
+type LiveContract = Record<string, (...args: unknown[]) => Promise<unknown>>;
+
+export type LiveMarketContracts = {
+  clearinghouse: LiveContract;
+  spotEngine: LiveContract;
+  perpEngine: LiveContract;
+  offchainExchange: LiveContract;
+};
+
+async function overloadedCall(
+  contract: LiveContract,
+  signature: string,
+  fallback: string,
+  args: unknown[] = []
+): Promise<unknown> {
+  const method = contract[signature] || contract[fallback];
+  if (typeof method !== 'function') throw new Error(`live contract is missing ${signature}`);
+  return method(...args);
+}
+
+function exactNumberSet(actual: unknown[], expected: number[], label: string): void {
+  const actualValues = actual.map((value) => BigNumber.from(value).toNumber()).sort((left, right) => left - right);
+  const expectedValues = [...expected].sort((left, right) => left - right);
+  if (JSON.stringify(actualValues) !== JSON.stringify(expectedValues)) {
+    throw new Error(`${label} mismatch: expected ${expectedValues.join(',')}, got ${actualValues.join(',')}`);
+  }
+}
+
+function exactNumberish(actual: unknown, expected: BigNumberish, label: string): void {
+  let matches = false;
+  try {
+    matches = BigNumber.from(actual).eq(BigNumber.from(expected));
+  } catch {
+    matches = false;
+  }
+  if (!matches) throw new Error(`${label} mismatch`);
+}
+
+function tupleValue(value: unknown, name: string, index: number): unknown {
+  const tuple = value as Record<string | number, unknown>;
+  return tuple?.[name] ?? tuple?.[index];
+}
+
+export async function verifyLiveMarketConfiguration(
+  contracts: LiveMarketContracts,
+  reviewedConfig: Pick<GalileoProducts, 'spreads' | 'products'>,
+  expectedQuoteToken: string
+): Promise<void> {
+  const expectedProductIds = reviewedConfig.products.map((product) => product.productId);
+  const spotProductIds = await overloadedCall(contracts.spotEngine, 'getProductIds()', 'getProductIds');
+  const perpProductIds = await overloadedCall(contracts.perpEngine, 'getProductIds()', 'getProductIds');
+  exactNumberSet(spotProductIds, [0], 'spot-engine product ID set');
+  exactNumberSet(perpProductIds, expectedProductIds, 'perp-engine product ID set');
+
+  exactNumberish(await contracts.clearinghouse.getSpreads(), reviewedConfig.spreads, 'clearinghouse spreads');
+  const expectedQuote = utils.getAddress(expectedQuoteToken);
+  const clearinghouseQuote = utils.getAddress(await contracts.clearinghouse.getQuote());
+  if (clearinghouseQuote !== expectedQuote) throw new Error('clearinghouse quote token mismatch');
+  const spotQuote = utils.getAddress(await contracts.spotEngine.getToken(0));
+  if (spotQuote !== expectedQuote) throw new Error('spot-engine product 0 token mismatch');
+
+  for (const product of reviewedConfig.products) {
+    const label = `${product.symbol} product ${product.productId}`;
+    const risk = await contracts.perpEngine.getRisk(product.productId);
+    for (const [name, index, expected] of [
+      ['longWeightInitialX18', 0, BigNumber.from(product.risk.longWeightInitial).mul(1_000_000_000)],
+      ['shortWeightInitialX18', 1, BigNumber.from(product.risk.shortWeightInitial).mul(1_000_000_000)],
+      ['longWeightMaintenanceX18', 2, BigNumber.from(product.risk.longWeightMaintenance).mul(1_000_000_000)],
+      ['shortWeightMaintenanceX18', 3, BigNumber.from(product.risk.shortWeightMaintenance).mul(1_000_000_000)],
+      ['priceX18', 4, product.risk.priceX18],
+    ] as const) {
+      exactNumberish(tupleValue(risk, name, index), expected, `${label} risk.${name}`);
+    }
+    exactNumberish(
+      await contracts.offchainExchange.getSizeIncrement(product.productId),
+      product.sizeIncrementX18,
+      `${label} size increment`
+    );
+    exactNumberish(
+      await contracts.offchainExchange.getMinSize(product.productId),
+      product.minSizeX18,
+      `${label} min size`
+    );
+    const lpParams = await contracts.offchainExchange.getLpParams(product.productId);
+    exactNumberish(tupleValue(lpParams, 'lpSpreadX18', 0), product.lpSpreadX18, `${label} LP spread`);
+  }
+}
+
 export async function verifyProxyDeployment(
   provider: providers.Provider,
   record: ProxyDeploymentEvidence,
@@ -426,7 +801,7 @@ export async function verifyProxyDeployment(
 }
 
 export function assertBuildEvidenceMatches(recorded: ReleaseBuildEvidence, reviewed: ReleaseBuildEvidence) {
-  if (JSON.stringify(recorded) !== JSON.stringify(reviewed)) {
+  if (releaseBuildEvidenceSha256(recorded) !== releaseBuildEvidenceSha256(reviewed)) {
     throw new Error('deployment manifest build evidence does not match reviewed local artifacts');
   }
 }
