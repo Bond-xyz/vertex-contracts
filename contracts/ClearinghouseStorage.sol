@@ -49,6 +49,10 @@ abstract contract ClearinghouseStorage {
 
     uint256 internal spreads;
 
+    // Bond fresh-deployment release mode. Appended after the audited Vertex
+    // layout; this cartridge is never used to upgrade an incumbent proxy.
+    uint8 internal releaseMode;
+
     function getLiqPriceX18(uint32 productId, int128 amount)
         internal
         view

@@ -93,6 +93,78 @@ contract Clearinghouse is
         return insurance;
     }
 
+    function getReleaseMode() external view returns (ReleaseMode) {
+        return ReleaseMode(releaseMode);
+    }
+
+    /// @notice Monotonically narrows this implementation from active trading
+    /// to close-only and, if needed, withdrawals-only operation.
+    function setReleaseMode(ReleaseMode newMode) external onlyOwner {
+        ReleaseMode previousMode = ReleaseMode(releaseMode);
+        if (uint8(newMode) <= uint8(previousMode))
+            revert ReleaseModeRegression();
+        if (newMode == ReleaseMode.WITHDRAWALS_ONLY) {
+            if (previousMode != ReleaseMode.CLOSE_ONLY)
+                revert ExitModeRequiresCloseOnly();
+            _assertWithdrawalsOnlyReady();
+        }
+        releaseMode = uint8(newMode);
+        emit ReleaseModeChanged(uint8(previousMode), uint8(newMode));
+    }
+
+    /// @dev Once all exchange paths are disabled, users must not depend on a
+    /// future match or LP burn to regain withdrawal health.
+    function _assertWithdrawalsOnlyReady() internal view {
+        IPerpEngine perpEngine = IPerpEngine(
+            address(engineByType[IProductEngine.EngineType.PERP])
+        );
+        uint32[] memory productIds = perpEngine.getProductIds();
+        for (uint256 i = 0; i < productIds.length; ++i) {
+            (
+                IPerpEngine.LpState memory lpState,
+                IPerpEngine.LpBalance memory lpBalance,
+                IPerpEngine.State memory state,
+                IPerpEngine.Balance memory xBalance
+            ) =
+                perpEngine.getStatesAndBalances(productIds[i], X_ACCOUNT);
+            if (
+                state.openInterest != 0 ||
+                state.availableSettle != 0 ||
+                lpState.supply != 0 ||
+                lpState.base != 0 ||
+                lpState.quote != 0 ||
+                lpBalance.amount != 0 ||
+                xBalance.amount != 0 ||
+                xBalance.vQuoteBalance != 0
+            )
+                revert ExitModeLiabilitiesRemain(productIds[i]);
+        }
+
+        ISpotEngine spotEngine = ISpotEngine(
+            address(engineByType[IProductEngine.EngineType.SPOT])
+        );
+        productIds = spotEngine.getProductIds();
+        for (uint256 i = 0; i < productIds.length; ++i) {
+            (
+                ISpotEngine.LpState memory lpState,
+                ISpotEngine.LpBalance memory lpBalance,
+                ISpotEngine.State memory state,
+                ISpotEngine.Balance memory xBalance
+            ) =
+                spotEngine.getStatesAndBalances(productIds[i], X_ACCOUNT);
+            if (
+                state.totalBorrowsNormalized != 0 ||
+                lpState.supply != 0 ||
+                lpState.base.amount != 0 ||
+                lpState.quote.amount != 0 ||
+                lpBalance.amount != 0 ||
+                xBalance.amount != 0 ||
+                (productIds[i] != QUOTE_PRODUCT_ID &&
+                    state.totalDepositsNormalized != 0)
+            ) revert ExitModeLiabilitiesRemain(productIds[i]);
+        }
+    }
+
     /// @notice grab total subaccount health
     function getHealth(
         bytes32 subaccount,
@@ -316,11 +388,21 @@ contract Clearinghouse is
         require(getHealth(sender, healthType) >= 0, ERR_SUBACCT_HEALTH);
 
         emit ModifyCollateral(amountRealized, sender, productId);
+        emit WithdrawalSettled(
+            sender,
+            productId,
+            sendTo,
+            address(token),
+            amount,
+            amountRealized
+        );
     }
 
     function mintLp(
         IEndpoint.MintLp calldata txn
     ) external virtual onlyEndpoint {
+        if (releaseMode != uint8(ReleaseMode.ACTIVE))
+            revert NewOrdersDisabled();
         require(txn.productId != QUOTE_PRODUCT_ID);
         productToEngine[txn.productId].mintLp(
             txn.productId,

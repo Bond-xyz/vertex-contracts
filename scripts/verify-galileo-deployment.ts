@@ -31,6 +31,7 @@ import {
   collectAndVerifyReleaseEvidence,
   TRACKED_GALILEO_RELEASE_POLICY,
 } from './release-attestation';
+import { collectContractInterfaceDiff } from './contract-interface-diff';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -83,8 +84,8 @@ function assertManifestMarketMatchesConfig(
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (manifest.schemaVersion !== 5) {
-    throw new Error('deployment manifest must use single-use signed-attestation provenance schema version 5');
+  if (manifest.schemaVersion !== 6) {
+    throw new Error('deployment manifest must use release-control provenance schema version 6');
   }
   if (manifest.release !== GALILEO_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
   const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
@@ -124,6 +125,13 @@ async function main() {
     throw new Error('deployment manifest source or reviewer attestation does not match tracked signed evidence');
   }
   const reviewedBuild = verifiedRelease.build;
+  const contractInterfaceDiff = await collectContractInterfaceDiff();
+  if (
+    manifest.source.contractInterfaceDiff?.sha256 !== contractInterfaceDiff.sha256 ||
+    manifest.gates?.reviewedContractDiffBound !== true
+  ) {
+    throw new Error('deployment manifest contract interface diff does not match the reviewed local candidate');
+  }
   if (
     manifest.source.buildEvidenceSha256 !== verifiedRelease.buildEvidenceSha256 ||
     manifest.source.productConfigSha256 !== verifiedRelease.productConfigSha256 ||
@@ -207,6 +215,19 @@ async function main() {
   const spotEngine = await ethers.getContractAt('SpotEngine', manifest.contracts.spotEngine.proxy);
   const perpEngine = await ethers.getContractAt('PerpEngine', manifest.contracts.perpEngine.proxy);
   const verifier = await ethers.getContractAt('Verifier', manifest.contracts.verifier.proxy);
+
+  if (
+    manifest.roles?.deployer !== manifest.deployer ||
+    manifest.roles?.sequencer !== manifest.sequencer ||
+    manifest.roles?.contractOwner !== manifest.deployer ||
+    manifest.roles?.proxyAdminOwner !== manifest.deployer ||
+    manifest.roles?.independentReleaseReviewer?.address !== verifiedRelease.reviewer.address ||
+    manifest.roles?.verifierKeys?.count !== verifierConfig.keys.length ||
+    manifest.roles?.verifierKeys?.signerBitmask !== verifierConfig.signerBitmask ||
+    manifest.roles?.verifierKeys?.privateMaterialRecorded !== false
+  ) {
+    throw new Error('deployment manifest role assignment mismatch');
+  }
 
   const minimumDeploymentNonce = manifest.deploymentIntent.firstTransactionNonce;
   if (manifest.contracts.sanctions.creation?.transactionNonce !== minimumDeploymentNonce) {
@@ -337,6 +358,46 @@ async function main() {
   if ((await endpoint.getSequencer()) !== manifest.sequencer) {
     throw new Error('sequencer mismatch');
   }
+  const releaseMode = BigNumber.from(await clearinghouse.getReleaseMode()).toNumber();
+  if (
+    manifest.releaseControls?.initialMode !== 0 ||
+    manifest.releaseControls?.implementationMonotonic !== true ||
+    manifest.releaseControls?.proxyAdminCanReplaceImplementation !== true ||
+    manifest.releaseControls?.proxyAdminUpgradeAllowedByGate1Procedure !== false ||
+    manifest.releaseControls?.withdrawalsOnlyRequiresPriorCloseOnly !== true ||
+    manifest.releaseControls?.withdrawalsOnlyRequiresZeroEnumerableLiabilities !== true ||
+    releaseMode < 0 ||
+    releaseMode > 2
+  ) {
+    throw new Error('release-control mode mismatch');
+  }
+  for (const [label, contract] of [
+    ['Verifier', verifier],
+    ['Endpoint', endpoint],
+    ['Clearinghouse', clearinghouse],
+    ['SpotEngine', spotEngine],
+    ['PerpEngine', perpEngine],
+    ['OffchainExchange', exchange],
+  ] as const) {
+    if ((await contract.owner()) !== manifest.roles.contractOwner) {
+      throw new Error(`${label} owner does not match the deployment manifest`);
+    }
+  }
+  if (
+    manifest.withdrawalContract?.token !== GALILEO_USDCE_ADDRESS ||
+    manifest.withdrawalContract?.collateralProductId !== 0 ||
+    manifest.withdrawalContract?.directLedgerFeeX18 !== '1000000000000000000' ||
+    manifest.withdrawalContract?.slowWalletQueueFeeUnits !== '1000000' ||
+    manifest.withdrawalContract?.slowTimeoutSeconds !== 259200 ||
+    manifest.withdrawalContract?.failureEvent !== 'SlowModeTransactionFailed(uint64)' ||
+    manifest.withdrawalContract?.cancellationSupported !== false ||
+    manifest.withdrawalContract?.localTimeTravelIsLive72HourEvidence !== false
+  ) {
+    throw new Error('withdrawal evidence contract mismatch');
+  }
+  if ((await spotEngine.getWithdrawFee(0)).toString() !== manifest.withdrawalContract.directLedgerFeeX18) {
+    throw new Error('live product-zero withdrawal fee mismatch');
+  }
   await verifyLiveMarketConfiguration(
     { clearinghouse, spotEngine, perpEngine, offchainExchange: exchange },
     products,
@@ -351,7 +412,8 @@ async function main() {
     }
   }
 
-  console.log('Galileo deployment verification passed.');
+  const releaseModeName = ['ACTIVE', 'CLOSE_ONLY', 'WITHDRAWALS_ONLY'][releaseMode];
+  console.log(`Galileo deployment verification passed. Current release mode: ${releaseModeName} (${releaseMode}).`);
 }
 
 main().catch((error) => {

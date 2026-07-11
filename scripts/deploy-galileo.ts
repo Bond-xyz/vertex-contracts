@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Manifest, ManifestData } from '@openzeppelin/upgrades-core';
 import { artifacts, ethers, network as hardhatNetwork, upgrades } from 'hardhat';
-import { Contract, ContractReceipt, ContractTransaction, utils } from 'ethers';
+import { BigNumber, Contract, ContractReceipt, ContractTransaction, utils } from 'ethers';
 import {
   GALILEO_CHAIN_ID,
   GALILEO_RELEASE_ID,
@@ -39,6 +39,7 @@ import {
   VerifiedReleaseEvidence,
   writeAfterVerifiedPostflight,
 } from './release-attestation';
+import { collectContractInterfaceDiff } from './contract-interface-diff';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const requiredAddress = (value: string | undefined, field: string): string => {
@@ -195,6 +196,7 @@ async function main() {
   if (quoteDecimals !== GALILEO_USDCE_DECIMALS || quoteSymbol !== GALILEO_USDCE_SYMBOL) {
     throw new Error(`Galileo collateral metadata mismatch: expected ${GALILEO_USDCE_SYMBOL}/${GALILEO_USDCE_DECIMALS}`);
   }
+  const preflightContractDiff = await collectContractInterfaceDiff();
 
   // The signed attestation and clean source tree are recomputed immediately before the first transaction.
   const firstDeployment = await executeAfterVerifiedPreflight(
@@ -280,6 +282,21 @@ async function main() {
       initialPrices(products.products)
     )
   );
+  if (!BigNumber.from(await clearinghouse.getReleaseMode()).isZero()) {
+    throw new Error('fresh Galileo deployment must start in ACTIVE release mode');
+  }
+  for (const [label, contract] of [
+    ['Verifier', verifier],
+    ['Endpoint', endpoint],
+    ['Clearinghouse', clearinghouse],
+    ['SpotEngine', spotEngine],
+    ['PerpEngine', perpEngine],
+    ['OffchainExchange', offchainExchange],
+  ] as const) {
+    if ((await contract.owner()) !== deployer.address) {
+      throw new Error(`${label} owner is not the signed deployment operator`);
+    }
+  }
 
   const VirtualBook = await ethers.getContractFactory('VirtualBook');
   const markets: Record<string, unknown> = {};
@@ -458,8 +475,12 @@ async function main() {
     async (postflight: VerifiedReleaseEvidence) => {
       assertSameVerifiedReleaseEvidence(preflight, postflight);
       const finalBuild = postflight.build;
+      const finalContractDiff = await collectContractInterfaceDiff();
+      if (finalContractDiff.sha256 !== preflightContractDiff.sha256) {
+        throw new Error('contract interface diff changed after deployment transactions');
+      }
       const manifest = {
-        schemaVersion: 5,
+        schemaVersion: 6,
         release: GALILEO_RELEASE_ID,
         deploymentIntent: postflight.deploymentIntent,
         openZeppelin: {
@@ -495,7 +516,11 @@ async function main() {
             'emit DepositCollateralWithReferral for Bond settlement provenance',
             'deploy unique non-custodial VirtualBook domains',
             'pin product zero to existing Galileo USDC.e and require exact custody transfers',
+            'add implementation-level monotonic ACTIVE to CLOSE_ONLY to WITHDRAWALS_ONLY release controls',
+            'emit exact same-token WithdrawalSettled conservation evidence',
+            'emit explicit slow-mode failure index evidence',
           ],
+          contractInterfaceDiff: finalContractDiff,
         },
         network: {
           name: '0G Galileo Testnet',
@@ -504,6 +529,18 @@ async function main() {
         deployer: deployer.address,
         sequencer,
         sequencerUsesDeployer: sequencer === deployer.address,
+        roles: {
+          deployer: deployer.address,
+          sequencer,
+          independentReleaseReviewer: postflight.reviewer,
+          contractOwner: deployer.address,
+          proxyAdminOwner: deployer.address,
+          verifierKeys: {
+            count: verifierPoints.length,
+            signerBitmask: verifierConfig.signerBitmask,
+            privateMaterialRecorded: false,
+          },
+        },
         quoteToken: quote,
         collateral: {
           address: GALILEO_USDCE_ADDRESS,
@@ -524,6 +561,46 @@ async function main() {
           offchainExchange: offchainExchangeRecord,
         },
         markets,
+        releaseControls: {
+          initialMode: 0,
+          modes: { ACTIVE: 0, CLOSE_ONLY: 1, WITHDRAWALS_ONLY: 2 },
+          implementationMonotonic: true,
+          proxyAdminCanReplaceImplementation: true,
+          proxyAdminUpgradeAllowedByGate1Procedure: false,
+          depositsDisabledOutsideActive: true,
+          unflaggedOrdersDisabledOutsideActive: true,
+          oversizedReduceOnlyOrdersClippedBeforeFill: true,
+          withdrawalEntryPointsEnabledInAllModes: true,
+          withdrawalsOnlyRequiresPriorCloseOnly: true,
+          withdrawalsOnlyRequiresZeroEnumerableLiabilities: true,
+        },
+        withdrawalContract: {
+          collateralProductId: 0,
+          token: GALILEO_USDCE_ADDRESS,
+          tokenDecimals: GALILEO_USDCE_DECIMALS,
+          directRequestedAmountUnits: 'USDC.e base units',
+          directLedgerFeeX18: '1000000000000000000',
+          slowRequestedAmountUnits: 'USDC.e base units',
+          slowWalletQueueFeeUnits: '1000000',
+          slowTimeoutSeconds: 259200,
+          successEvent: 'WithdrawalSettled(bytes32,uint32,address,address,uint128,int128)',
+          failureEvent: 'SlowModeTransactionFailed(uint64)',
+          cancellationSupported: false,
+          localTimeTravelIsLive72HourEvidence: false,
+        },
+        explorerVerification: {
+          explorer: 'https://chainscan-galileo.0g.ai',
+          status: 'pending_after_deployment',
+          requiredBeforeRelease: true,
+          verifyProxyImplementationAndAdmin: true,
+        },
+        rollbackAndAbandonment: {
+          beforeAnyDeposit: 'Do not publish the registry; retain the manifest and abandon the parallel graph.',
+          afterAnyDeposit:
+            'Remain in CLOSE_ONLY until perp open interest, available settlement, LP supply and reserves, spot borrows and LP reserves, X-account balances, and non-quote deposits are zero and per-account PnL is reconciled; then move to WITHDRAWALS_ONLY, complete and reconcile every same-token exit, and remove the graph from the registry.',
+          proxyUpgradeAsRollback: false,
+          incumbentMutationOrDeletion: false,
+        },
         gates: {
           signedBatchAbiOnly: true,
           orderSignaturesEnforced: true,
@@ -540,6 +617,10 @@ async function main() {
           exactLiveMarketConfiguration: true,
           exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
           collateralTokenDeploymentAbsent: true,
+          reviewedContractDiffBound: true,
+          releaseModeStartsActive: true,
+          withdrawalSuccessEventAvailable: true,
+          explorerVerificationComplete: false,
         },
       };
 

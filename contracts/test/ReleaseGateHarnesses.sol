@@ -2,6 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "../OffchainExchange.sol";
+import "../PerpEngine.sol";
+import "../SpotEngine.sol";
 import "../interfaces/IEndpoint.sol";
 import "../util/MockERC20.sol";
 
@@ -15,6 +17,48 @@ contract TransferTaxMockERC20 is MockERC20 {
     ) internal override {
         super._transfer(sender, recipient, amount - 1);
         _burn(sender, 1);
+    }
+}
+
+contract SpotEngineReleaseHarness is SpotEngine {
+    function setExitTotalsForTest(
+        uint32 productId,
+        int128 totalBorrowsNormalized,
+        int128 lpSupply
+    ) external {
+        states[productId].totalBorrowsNormalized = totalBorrowsNormalized;
+        lpStates[productId].supply = lpSupply;
+    }
+
+    function setExitXAccountForTest(
+        uint32 productId,
+        int128 amountNormalized
+    ) external {
+        balances[productId][X_ACCOUNT]
+            .balance
+            .amountNormalized = amountNormalized;
+    }
+}
+
+contract PerpEngineReleaseHarness is PerpEngine {
+    function setExitTotalsForTest(
+        uint32 productId,
+        int128 openInterest,
+        int128 availableSettle,
+        int128 lpSupply
+    ) external {
+        states[productId].openInterest = openInterest;
+        states[productId].availableSettle = availableSettle;
+        lpStates[productId].supply = lpSupply;
+    }
+
+    function setExitXAccountForTest(
+        uint32 productId,
+        int128 amount,
+        int128 vQuoteBalance
+    ) external {
+        balances[productId][X_ACCOUNT].amount = amount;
+        balances[productId][X_ACCOUNT].vQuoteBalance = vQuoteBalance;
     }
 }
 
@@ -54,6 +98,14 @@ contract MockClearinghouseForEndpoint {
 
     function getEngineByProduct(uint32) external pure returns (address) {
         return address(0);
+    }
+
+    function getReleaseMode()
+        external
+        pure
+        returns (IClearinghouse.ReleaseMode)
+    {
+        return IClearinghouse.ReleaseMode.ACTIVE;
     }
 }
 

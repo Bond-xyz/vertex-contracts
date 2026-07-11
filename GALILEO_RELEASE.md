@@ -9,6 +9,8 @@ This branch starts at audited Vertex V2 commit `6d5df597afe4eb16c6131a85f45322e0
 3. Emit `DepositCollateralWithReferral`, which Bond settlement indexes for deposit provenance.
 4. Deploy one non-custodial `VirtualBook` marker per product to prevent cross-market signature replay.
 5. Pin product zero to the existing Galileo USDC.e and restrict collateral custody to exact quote-token transfers.
+6. Add implementation-level monotonic `ACTIVE` → `CLOSE_ONLY` → `WITHDRAWALS_ONLY` release controls without changing the audited Endpoint function or storage surface.
+7. Emit exact `WithdrawalSettled` success and `SlowModeTransactionFailed` failure evidence.
 
 The proxy deployment explicitly permits the audited `Clearinghouse` delegatecall to the pinned `ClearinghouseLiq` implementation; no other unsafe OpenZeppelin validation bypass is allowed.
 
@@ -47,7 +49,7 @@ The deployer must still have that exact pending nonce, the intent must be unexpi
 
 `corepack yarn evidence:galileo` produces only an unsigned review request containing the EIP-712 domain, types, payload, and digest. It never creates a signature or accepted attestation. The independent reviewer checks the clean commit and evidence, signs the exact payload using their normal external signing process, and returns a local JSON object with `schemaVersion`, the unchanged `payload`, and the 65-byte `signature`. The deployer stores it at the ignored path selected by `PERPDEX_RELEASE_ATTESTATION_FILE`.
 
-The deployment script validates the signature against tracked policy and recomputes the clean Git commit/tree plus every bound digest immediately before its first transaction. It also rejects a zero sequencer, a reviewer who is the deployer or sequencer, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v5 deployment manifest if the signature, reviewer, intent, commit/tree, policy, build, products, or Verifier evidence drifted. The standalone verifier repeats reviewer independence and signed-evidence checks against both the local checkout and schema-v5 manifest.
+The deployment script validates the signature against tracked policy and recomputes the clean Git commit/tree plus every bound digest immediately before its first transaction. It also rejects a zero sequencer, a reviewer who is the deployer or sequencer, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v6 deployment manifest if the signature, reviewer, intent, commit/tree, policy, build, products, Verifier evidence, or reviewed contract diff drifted. The standalone verifier repeats reviewer independence and signed-evidence checks against both the local checkout and schema-v6 manifest.
 
 Build evidence does not trust artifact/build-info agreement alone. It deterministically recompiles each application build input with exact solc `0.8.13`, then requires the security-relevant compiler output and every artifact's creation/runtime bytecode to match. OpenZeppelin upgrades-core deploys prebuilt `TransparentUpgradeableProxy` and `ProxyAdmin` artifacts originally compiled by exact solc `0.8.9`; the evidence collector deterministically recompiles that package's embedded build input with exact `0.8.9` and requires byte-for-byte equality. Both compiler versions, full settings, input/output hashes, source hashes, creation hashes, and runtime hashes are included in the signed build-evidence digest.
 
@@ -58,6 +60,7 @@ Post-deploy verification also reads each transparent proxy's EIP-1967 implementa
 ```bash
 HUSKY=0 corepack yarn install --frozen-lockfile --ignore-engines
 corepack yarn force-compile
+corepack yarn diff:galileo
 corepack yarn test:release
 ```
 
@@ -75,6 +78,10 @@ The deployment remains fail-closed until both tracked blockers are resolved in a
 2. `config/galileo.products.json` is explicitly set to `approved: true` after Rust/contract X18 golden-vector review.
 
 Neither blocker may be bypassed with an environment variable.
+
+## Shutdown and withdrawal contract
+
+The exact ABI, flag, nonce, funding-tick, fee, slow-exit, mode, and rollback contract is recorded in [`GALILEO_GATE1_CONTRACT_INTERFACE.md`](GALILEO_GATE1_CONTRACT_INTERFACE.md). Local time travel is regression evidence, not a substitute for the required live 72-hour Galileo exit.
 
 ## Fresh deployment command
 

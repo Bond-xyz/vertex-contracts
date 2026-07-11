@@ -30,6 +30,7 @@ import {
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from '../scripts/release-evidence';
+import { collectContractInterfaceDiff, ContractInterfaceDiffEntry } from '../scripts/contract-interface-diff';
 
 const TEST_VERIFIER_KEYS = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, `0x${'33'.repeat(32)}`];
 
@@ -140,6 +141,23 @@ describe('Galileo audited-base release gates', () => {
     ).to.throw('hard budget');
     expect(build.artifacts.transparentUpgradeableProxy.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
     expect(build.artifacts.proxyAdmin.runtimeCodeHash).to.match(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('binds the reviewed ABI, storage prefix, bytecode delta, and fresh release controls', async () => {
+    const report = await collectContractInterfaceDiff();
+    expect(report.baselineCommit).to.equal('7ae12f1605e8d3c0790fdfbb98922b6014b00377');
+    expect(report.sha256).to.match(/^[0-9a-f]{64}$/);
+    const contracts = report.contracts as Record<string, ContractInterfaceDiffEntry>;
+    expect(contracts.endpoint.runtime.afterBytes).to.be.lessThan(ENDPOINT_RUNTIME_BUDGET_BYTES);
+    expect(contracts.endpoint.functions).to.deep.equal({ added: [], removed: [] });
+    expect(contracts.endpoint.events).to.deep.equal({
+      added: ['SlowModeTransactionFailed(uint64)'],
+      removed: [],
+    });
+    expect(contracts.endpoint.storage).to.deep.equal({ appended: [] });
+    expect(contracts.clearinghouse.storage.appended).to.deep.equal(['113:0:releaseMode:t_uint8']);
+    expect(contracts.clearinghouse.functions.added).to.deep.equal(['getReleaseMode()', 'setReleaseMode(uint8)']);
+    expect(contracts.virtualBook.runtime.afterCodeHash).to.equal(contracts.virtualBook.runtime.beforeCodeHash);
   });
 
   it('rejects a one-byte artifact mutation against the matching solc build-info output', async () => {
