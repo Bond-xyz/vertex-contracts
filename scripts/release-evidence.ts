@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { BigNumber, BigNumberish, Contract, providers, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
+import appSolc = require('solc-0.8.13');
 import proxySolc = require('solc-0.8.9');
 import type { GalileoProducts } from './deployment-config';
 
@@ -127,7 +128,7 @@ type SolcContractOutput = {
   };
 };
 
-type SolcBuildInfoShape = {
+export type SolcBuildInfoShape = {
   id?: string;
   solcVersion?: string;
   solcLongVersion: string;
@@ -139,6 +140,11 @@ type SolcBuildInfoShape = {
     contracts: Record<string, Record<string, SolcContractOutput>>;
     errors?: Array<{ severity: string; formattedMessage?: string; message?: string }>;
   };
+};
+
+type SolcCompiler = {
+  version(): string;
+  compile(input: string): string;
 };
 
 function canonicalize(value: unknown): unknown {
@@ -164,24 +170,6 @@ const sha256Text = (value: string): string => crypto.createHash('sha256').update
 
 export const sha256File = (file: string): string =>
   crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-
-export function requireReviewedSha256(value: string | undefined, label: string): string {
-  if (!value || !/^[0-9a-f]{64}$/i.test(value)) {
-    throw new Error(`${label} must be the reviewer-pinned 64-character SHA-256`);
-  }
-  return value.toLowerCase();
-}
-
-export function verifyConfigFileSha256(file: string, expected: string, label: string): string {
-  if (!/^[0-9a-f]{64}$/i.test(expected)) {
-    throw new Error(`${label} manifest SHA-256 is invalid`);
-  }
-  const actual = sha256File(file);
-  if (actual.toLowerCase() !== expected.toLowerCase()) {
-    throw new Error(`${label} SHA-256 mismatch: expected ${expected}, got ${actual}`);
-  }
-  return actual;
-}
 
 function uint256Hex(value: BigNumberish, label: string): string {
   let parsed: BigNumber;
@@ -345,6 +333,59 @@ export function assertArtifactMatchesBuildInfo(
   }
 }
 
+function compileBuildInfoInput(
+  buildInfo: SolcBuildInfoShape,
+  compiler: SolcCompiler,
+  requiredSolcVersion: string,
+  label: string
+): NonNullable<SolcBuildInfoShape['output']> {
+  const declaredVersion = buildInfo.solcVersion || buildInfo.solcLongVersion.split('+')[0];
+  if (declaredVersion !== requiredSolcVersion) {
+    throw new Error(`${label} must use exact solc ${requiredSolcVersion}, got ${declaredVersion}`);
+  }
+  const actualCompiler = compiler.version();
+  if (actualCompiler !== `${buildInfo.solcLongVersion}.Emscripten.clang`) {
+    throw new Error(`${label} compiler mismatch: expected ${buildInfo.solcLongVersion}, got ${actualCompiler}`);
+  }
+  const output = JSON.parse(compiler.compile(JSON.stringify(buildInfo.input))) as NonNullable<
+    SolcBuildInfoShape['output']
+  >;
+  const compilerErrors = (output.errors || []).filter((error) => error.severity === 'error');
+  if (compilerErrors.length > 0) {
+    throw new Error(
+      `${label} deterministic compile failed: ${compilerErrors
+        .map((error) => error.formattedMessage || error.message)
+        .join('\n')}`
+    );
+  }
+  return output;
+}
+
+export function reproduceApplicationBuildInfo(
+  buildInfo: SolcBuildInfoShape
+): NonNullable<SolcBuildInfoShape['output']> {
+  if (!buildInfo.output) throw new Error('application build-info has no recorded output');
+  const reproduced = compileBuildInfoInput(buildInfo, appSolc, '0.8.13', 'application build');
+  const securityRelevantOutput = (output: NonNullable<SolcBuildInfoShape['output']>) => ({
+    contracts: output.contracts,
+    errors: output.errors || [],
+    sourceIds: Object.fromEntries(
+      Object.entries((output as unknown as { sources?: Record<string, { id: number }> }).sources || {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([sourceName, source]) => [sourceName, source.id])
+    ),
+  });
+  // solc-js and Hardhat serialize a few negative AST declaration sentinels differently
+  // (signed vs uint32), so compare deterministic bytecode/ABI/errors/source IDs rather than AST JSON spelling.
+  if (
+    deterministicSha256(securityRelevantOutput(reproduced)) !==
+    deterministicSha256(securityRelevantOutput(buildInfo.output))
+  ) {
+    throw new Error('application build-info output does not match deterministic solc 0.8.13 reproduction');
+  }
+  return reproduced;
+}
+
 function sourceEvidenceFromFiles(
   repoRoot: string,
   sources: Record<string, { content?: string }>
@@ -431,23 +472,7 @@ function collectOpenZeppelinProxyBuildEvidence(repoRoot: string): {
 } {
   const buildInfoFile = require.resolve('@openzeppelin/upgrades-core/artifacts/build-info.json');
   const packageBuildInfo = JSON.parse(fs.readFileSync(buildInfoFile, 'utf8')) as SolcBuildInfoShape;
-  const actualCompiler = proxySolc.version();
-  if (actualCompiler !== `${packageBuildInfo.solcLongVersion}.Emscripten.clang`) {
-    throw new Error(
-      `OpenZeppelin proxy compiler mismatch: expected ${packageBuildInfo.solcLongVersion}, got ${actualCompiler}`
-    );
-  }
-  const output = JSON.parse(proxySolc.compile(JSON.stringify(packageBuildInfo.input))) as NonNullable<
-    SolcBuildInfoShape['output']
-  >;
-  const compilerErrors = (output.errors || []).filter((error) => error.severity === 'error');
-  if (compilerErrors.length > 0) {
-    throw new Error(
-      `OpenZeppelin proxy build failed: ${compilerErrors
-        .map((error) => error.formattedMessage || error.message)
-        .join('\n')}`
-    );
-  }
+  const output = compileBuildInfoInput(packageBuildInfo, proxySolc, '0.8.9', 'OpenZeppelin proxy build');
   const buildInfoId = 'openzeppelin-upgrades-core-proxies-solc-0.8.9';
   const artifacts: Record<string, ArtifactRuntimeEvidence> = {};
   for (const [key, contractName] of [
@@ -483,19 +508,25 @@ export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise
   const releaseArtifacts: Record<string, ArtifactRuntimeEvidence> = {};
   let compiler: CompilerEvidence | undefined;
   const buildInfos: Record<string, SolcBuildInfoEvidence> = {};
+  const reproducedOutputs = new Map<string, NonNullable<SolcBuildInfoShape['output']>>();
 
   for (const [key, fullyQualifiedName] of Object.entries(RELEASE_ARTIFACTS)) {
     const artifact = (await artifacts.readArtifact(fullyQualifiedName)) as ArtifactShape;
     const buildInfo = (await artifacts.getBuildInfo(fullyQualifiedName)) as SolcBuildInfoShape | undefined;
     if (!buildInfo) throw new Error(`missing build info for ${fullyQualifiedName}`);
     if (!buildInfo.output) throw new Error(`build info has no output for ${fullyQualifiedName}`);
-    const contractOutput = buildInfo.output.contracts?.[artifact.sourceName]?.[artifact.contractName];
+    const buildInfoId = `hardhat-${buildInfo.id || deterministicSha256(buildInfo.input)}`;
+    let reproducedOutput = reproducedOutputs.get(buildInfoId);
+    if (!reproducedOutput) {
+      reproducedOutput = reproduceApplicationBuildInfo(buildInfo);
+      reproducedOutputs.set(buildInfoId, reproducedOutput);
+    }
+    const contractOutput = reproducedOutput.contracts?.[artifact.sourceName]?.[artifact.contractName];
     if (!contractOutput) throw new Error(`build info output is missing ${fullyQualifiedName}`);
     assertArtifactMatchesBuildInfo(artifact, contractOutput, fullyQualifiedName);
     const immutableReferences = Object.values(
       contractOutput.evm.deployedBytecode.immutableReferences || {}
     ).flat() as Array<{ start: number; length: number }>;
-    const buildInfoId = `hardhat-${buildInfo.id || deterministicSha256(buildInfo.input)}`;
     releaseArtifacts[key] = artifactEvidence(artifact, fullyQualifiedName, buildInfoId, immutableReferences);
     const candidate: CompilerEvidence = {
       solcVersion: buildInfo.solcVersion || buildInfo.solcLongVersion.split('+')[0],
@@ -520,7 +551,7 @@ export async function collectReleaseBuildEvidence(artifacts: Artifacts): Promise
       buildInfos[buildInfoId] = buildInfoEvidence(
         buildInfoId,
         buildInfo,
-        buildInfo.output,
+        reproducedOutput,
         path.relative(repoRoot, generatedBuildInfoFile).split(path.sep).join('/'),
         sha256File(generatedBuildInfoFile),
         sourceEvidenceFromFiles(repoRoot, buildInfo.input.sources)
@@ -551,16 +582,22 @@ function git(repoRoot: string, args: string[]): string {
   }).trim();
 }
 
+export function loadCurrentCleanSourceEvidence(repoRoot: string): ReviewedSourceEvidence {
+  const releaseCommit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const sourceTree = git(repoRoot, ['rev-parse', 'HEAD^{tree}']);
+  return loadReviewedSourceEvidence(repoRoot, releaseCommit, sourceTree);
+}
+
 export function loadReviewedSourceEvidence(
   repoRoot: string,
   expectedCommit: string | undefined,
   expectedTree: string | undefined
 ): ReviewedSourceEvidence {
   if (!expectedCommit || !/^[0-9a-f]{40}$/i.test(expectedCommit)) {
-    throw new Error('PERPDEX_REVIEWED_RELEASE_COMMIT must be the reviewed 40-character commit');
+    throw new Error('reviewed release commit must be a 40-character Git object');
   }
   if (!expectedTree || !/^[0-9a-f]{40}$/i.test(expectedTree)) {
-    throw new Error('PERPDEX_REVIEWED_SOURCE_TREE must be the reviewed 40-character tree');
+    throw new Error('reviewed source tree must be a 40-character Git object');
   }
   const dirty = git(repoRoot, ['status', '--porcelain', '--untracked-files=all']);
   if (dirty) throw new Error('refusing release evidence from a dirty source tree');

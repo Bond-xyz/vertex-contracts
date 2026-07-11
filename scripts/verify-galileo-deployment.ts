@@ -7,29 +7,22 @@ import {
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
-  loadProducts,
-  loadVerifierConfig,
   requireGalileoUsdce,
 } from './deployment-config';
 import type { ProductConfig } from './deployment-config';
 import {
   assertVerifierPublicKeysMatch,
   assertBuildEvidenceMatches,
-  collectReleaseBuildEvidence,
-  loadReviewedSourceEvidence,
   normalizeVerifierPublicKeys,
   ReleaseBuildEvidence,
-  releaseBuildEvidenceSha256,
-  repositoryRoot,
-  requireReviewedSha256,
   verifyActiveClearinghouseLiq,
-  verifyConfigFileSha256,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
+import { collectAndVerifyReleaseEvidence, TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -45,6 +38,13 @@ type ManifestMarketConfig = {
   minSizeX18: unknown;
   lpSpreadX18: unknown;
   risk?: Record<string, unknown>;
+};
+
+type ManifestMarket = ManifestMarketConfig & {
+  productId: number;
+  artifactKey: string;
+  virtualBook: string;
+  runtimeCodeHash: string;
 };
 
 function assertManifestMarketMatchesConfig(
@@ -74,39 +74,42 @@ function assertManifestMarketMatchesConfig(
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (manifest.schemaVersion !== 3) {
-    throw new Error('deployment manifest must use provenance schema version 3');
+  if (manifest.schemaVersion !== 4) {
+    throw new Error('deployment manifest must use signed-attestation provenance schema version 4');
   }
-  const reviewedSource = loadReviewedSourceEvidence(
-    repositoryRoot(),
-    process.env.PERPDEX_REVIEWED_RELEASE_COMMIT,
-    process.env.PERPDEX_REVIEWED_SOURCE_TREE
+  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
+  const verifierFile = path.resolve(
+    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
   );
-  if (
-    manifest.source.reviewedReleaseCommit !== reviewedSource.releaseCommit ||
-    manifest.source.reviewedSourceTree !== reviewedSource.sourceTree
-  ) {
-    throw new Error('deployment manifest source commit/tree does not match reviewer-pinned source');
+  const recordedAttestation = manifest.source.reviewAttestation;
+  if (!recordedAttestation || recordedAttestation.policyFile !== TRACKED_GALILEO_RELEASE_POLICY) {
+    throw new Error('deployment manifest is missing the tracked signed reviewer-attestation policy');
   }
-  const expectedBuildEvidenceSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256,
-    'PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256'
-  );
-  const expectedProductConfigSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256,
-    'PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256'
-  );
-  const expectedVerifierConfigSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256,
-    'PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256'
-  );
-  const reviewedBuild = await collectReleaseBuildEvidence(artifacts);
-  const actualBuildEvidenceSha256 = releaseBuildEvidenceSha256(reviewedBuild);
+  const verifiedRelease = await collectAndVerifyReleaseEvidence({
+    artifacts,
+    productsFile,
+    verifierFile,
+    attestation: recordedAttestation.signedAttestation,
+  });
   if (
-    actualBuildEvidenceSha256 !== expectedBuildEvidenceSha256 ||
-    manifest.source.buildEvidenceSha256 !== expectedBuildEvidenceSha256
+    manifest.source.reviewedReleaseCommit !== verifiedRelease.source.releaseCommit ||
+    manifest.source.reviewedSourceTree !== verifiedRelease.source.sourceTree ||
+    recordedAttestation.policyId !== verifiedRelease.policy.policyId ||
+    recordedAttestation.policyVersion !== verifiedRelease.policy.policyVersion ||
+    recordedAttestation.policySha256 !== verifiedRelease.policySha256 ||
+    recordedAttestation.digest !== verifiedRelease.attestationDigest ||
+    recordedAttestation.reviewer?.address !== verifiedRelease.reviewer.address ||
+    recordedAttestation.reviewer?.name !== verifiedRelease.reviewer.name
   ) {
-    throw new Error('reviewed build evidence SHA-256 does not match local build and deployment manifest');
+    throw new Error('deployment manifest source or reviewer attestation does not match tracked signed evidence');
+  }
+  const reviewedBuild = verifiedRelease.build;
+  if (
+    manifest.source.buildEvidenceSha256 !== verifiedRelease.buildEvidenceSha256 ||
+    manifest.source.productConfigSha256 !== verifiedRelease.productConfigSha256 ||
+    manifest.source.verifierPublicKeysSha256 !== verifiedRelease.verifierConfigSha256
+  ) {
+    throw new Error('deployment manifest build/config digests do not match signed reviewer evidence');
   }
   const recordedBuild: ReleaseBuildEvidence = {
     compiler: manifest.source.compiler,
@@ -119,20 +122,8 @@ async function main() {
       throw new Error(`manifest runtime hash index mismatch for ${key}`);
     }
   }
-  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
-  const verifierFile = path.resolve(
-    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
-  );
-  if (
-    manifest.source.productConfigSha256 !== expectedProductConfigSha256 ||
-    manifest.source.verifierPublicKeysSha256 !== expectedVerifierConfigSha256
-  ) {
-    throw new Error('deployment manifest config hashes do not match reviewer-pinned hashes');
-  }
-  verifyConfigFileSha256(productsFile, expectedProductConfigSha256, 'product config');
-  verifyConfigFileSha256(verifierFile, expectedVerifierConfigSha256, 'verifier public-key config');
-  const products = loadProducts(productsFile);
-  const verifierConfig = loadVerifierConfig(verifierFile);
+  const products = verifiedRelease.products;
+  const verifierConfig = verifiedRelease.verifierConfig;
   const verifierPublicKeys = normalizeVerifierPublicKeys([
     ...verifierConfig.keys,
     ...Array.from({ length: 5 }, () => ({ x: 0, y: 0 })),
@@ -182,7 +173,7 @@ async function main() {
     manifest.contracts.spotEngine.proxy,
     manifest.contracts.perpEngine.proxy,
     manifest.contracts.offchainExchange.proxy,
-    ...Object.values(manifest.markets).map((market: any) => market.virtualBook),
+    ...(Object.values(manifest.markets) as ManifestMarket[]).map((market) => market.virtualBook),
   ];
   for (const address of addresses) {
     if ((await ethers.provider.getCode(address)) === '0x') {
@@ -231,7 +222,7 @@ async function main() {
     manifest.contracts.verifier.signerCount,
     manifest.contracts.verifier.signerBitmask
   );
-  for (const [symbol, market] of Object.entries(manifest.markets) as any[]) {
+  for (const [symbol, market] of Object.entries(manifest.markets) as Array<[string, ManifestMarket]>) {
     if (market.artifactKey !== 'virtualBook') {
       throw new Error(`manifest virtual-book artifact key mismatch for ${symbol}`);
     }
@@ -270,7 +261,7 @@ async function main() {
     products,
     collateral
   );
-  for (const market of Object.values(manifest.markets) as any[]) {
+  for (const market of Object.values(manifest.markets) as ManifestMarket[]) {
     if ((await clearinghouse.getEngineByProduct(market.productId)) !== manifest.contracts.perpEngine.proxy) {
       throw new Error(`engine mismatch for product ${market.productId}`);
     }

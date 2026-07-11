@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-galileo-testnet-release",
+  "policyVersion": 1,
+  "attestationDomain": {
+    "name": "Bond PerpDex Galileo Release",
+    "version": "1"
+  },
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "requiredReviewerSignatures": 1,
+  "reviewers": [],
+  "status": "blocked_pending_named_reviewer_and_product_approval"
+}

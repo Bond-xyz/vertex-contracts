@@ -1,8 +1,7 @@
 import { expect } from 'chai';
 import { artifacts, ethers, upgrades } from 'hardhat';
-import { BigNumber, Contract, Wallet, utils } from 'ethers';
+import { BigNumber, Contract, Signer, Wallet, utils } from 'ethers';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { publicPoint, signSchnorrForTest, subaccountFor } from './helpers/schnorr';
 import { GALILEO_USDCE_ADDRESS, requireGalileoUsdce } from '../scripts/deployment-config';
@@ -17,10 +16,7 @@ import {
   normalizeVerifierPublicKeys,
   RELEASE_ARTIFACTS,
   releaseBuildEvidenceSha256,
-  requireReviewedSha256,
-  sha256File,
   verifyActiveClearinghouseLiq,
-  verifyConfigFileSha256,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
@@ -49,8 +45,8 @@ async function deployEndpointFixture(useTransferTaxToken?: boolean): Promise<{
   token: Contract;
   clearinghouse: Contract;
   verifier: Contract;
-  sequencer: any;
-  user: any;
+  sequencer: Signer & { address: string };
+  user: Signer & { address: string };
 }> {
   const [, sequencer, user] = await ethers.getSigners();
   const Token = await ethers.getContractFactory(useTransferTaxToken ? 'TransferTaxMockERC20' : 'MockERC20');
@@ -137,29 +133,8 @@ describe('Galileo audited-base release gates', () => {
     ).to.throw('artifact creation bytecode does not match solc build-info output');
   });
 
-  it('recomputes product and verifier config hashes and rejects changed evidence', () => {
-    const productsFile = path.join(__dirname, '..', 'config', 'galileo.products.json');
-    const productsHash = sha256File(productsFile);
-    expect(verifyConfigFileSha256(productsFile, productsHash, 'product config')).to.equal(productsHash);
-    expect(() => verifyConfigFileSha256(productsFile, '00'.repeat(32), 'product config')).to.throw(
-      'product config SHA-256 mismatch'
-    );
-
-    const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'bond-verifier-config-'));
-    const verifierFile = path.join(tempDirectory, 'verifier-public-keys.json');
-    try {
-      fs.writeFileSync(verifierFile, JSON.stringify({ chainId: 16602, signerBitmask: 7, keys: [] }));
-      const verifierHash = sha256File(verifierFile);
-      expect(verifyConfigFileSha256(verifierFile, verifierHash, 'verifier public-key config')).to.equal(verifierHash);
-      expect(() => verifyConfigFileSha256(verifierFile, 'ff'.repeat(32), 'verifier public-key config')).to.throw(
-        'verifier public-key config SHA-256 mismatch'
-      );
-      expect(requireReviewedSha256(verifierHash, 'reviewed verifier config')).to.equal(verifierHash);
-      expect(() => requireReviewedSha256(undefined, 'reviewed verifier config')).to.throw('reviewer-pinned');
-      expect(deterministicSha256({ b: 2, a: 1 })).to.equal(deterministicSha256({ a: 1, b: 2 }));
-    } finally {
-      fs.rmSync(tempDirectory, { recursive: true, force: true });
-    }
+  it('canonicalizes evidence before hashing', () => {
+    expect(deterministicSha256({ b: 2, a: 1 })).to.equal(deterministicSha256({ a: 1, b: 2 }));
   });
 
   it('pins the only accepted Galileo collateral address', () => {
@@ -228,6 +203,11 @@ describe('Galileo audited-base release gates', () => {
     }
     expect(await verifier.getSignerCount()).to.equal(3);
     await verifyVerifierQuorumConfiguration(verifier, expected, 3, 7);
+    await expectFailure(verifyVerifierQuorumConfiguration(verifier, expected, 4, 7), 'verifier signer count mismatch');
+    await expectFailure(
+      verifyVerifierQuorumConfiguration(verifier, expected, 3, 3),
+      'verifier signer bitmask mismatch'
+    );
 
     const updatePrice = utils.hexConcat([
       '0x04',
@@ -479,15 +459,30 @@ describe('Galileo audited-base release gates', () => {
       'perp-engine product ID set mismatch'
     );
 
-    const wrongRisk = live();
-    wrongRisk.perpEngine.getRisk = async () => ({
-      ...risk(),
-      priceX18: BigNumber.from(product.risk.priceX18).add(1),
-    });
+    const wrongSpotProductSet = live();
+    wrongSpotProductSet.spotEngine['getProductIds()'] = async () => [0, 1];
     await expectFailure(
-      verifyLiveMarketConfiguration(wrongRisk, reviewedConfig, quote.address),
-      'risk.priceX18 mismatch'
+      verifyLiveMarketConfiguration(wrongSpotProductSet, reviewedConfig, quote.address),
+      'spot-engine product ID set mismatch'
     );
+
+    for (const riskField of [
+      'longWeightInitialX18',
+      'shortWeightInitialX18',
+      'longWeightMaintenanceX18',
+      'shortWeightMaintenanceX18',
+      'priceX18',
+    ] as const) {
+      const wrongRisk = live();
+      wrongRisk.perpEngine.getRisk = async () => ({
+        ...risk(),
+        [riskField]: BigNumber.from(risk()[riskField]).add(1),
+      });
+      await expectFailure(
+        verifyLiveMarketConfiguration(wrongRisk, reviewedConfig, quote.address),
+        `risk.${riskField} mismatch`
+      );
+    }
 
     for (const [method, message] of [
       ['getSizeIncrement', 'size increment mismatch'],

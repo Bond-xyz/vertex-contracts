@@ -1,36 +1,37 @@
 import fs from 'fs';
 import path from 'path';
 import { artifacts, ethers, upgrades } from 'hardhat';
-import { Contract, ContractReceipt, utils } from 'ethers';
+import { Contract, ContractReceipt, ContractTransaction, utils } from 'ethers';
 import {
   GALILEO_CHAIN_ID,
   GALILEO_USDCE_ADDRESS,
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
   initialPrices,
-  loadProducts,
-  loadVerifierConfig,
   requireGalileoUsdce,
 } from './deployment-config';
 import {
   ArtifactRuntimeEvidence,
-  collectReleaseBuildEvidence,
   inspectProxyDeployment,
-  loadReviewedSourceEvidence,
   normalizeVerifierPublicKeys,
   ReleaseArtifactKey,
   ReleaseBuildEvidence,
-  releaseBuildEvidenceSha256,
-  repositoryRoot,
-  requireReviewedSha256,
   verifyActiveClearinghouseLiq,
-  verifyConfigFileSha256,
   verifyLiveMarketConfiguration,
   verifyProxyDeployment,
   verifyRuntimeArtifact,
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
+import {
+  assertIndependentReleaseReviewer,
+  assertSameVerifiedReleaseEvidence,
+  collectAndVerifyReleaseEvidence,
+  executeAfterVerifiedPreflight,
+  TRACKED_GALILEO_RELEASE_POLICY,
+  VerifiedReleaseEvidence,
+  writeAfterVerifiedPostflight,
+} from './release-attestation';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const requiredAddress = (value: string | undefined, field: string): string => {
@@ -38,7 +39,7 @@ const requiredAddress = (value: string | undefined, field: string): string => {
   return utils.getAddress(value);
 };
 
-const receipt = async (transaction: any): Promise<ContractReceipt> => transaction.wait();
+const receipt = async (transaction: ContractTransaction): Promise<ContractReceipt> => transaction.wait();
 
 const deploymentBlock = async (contract: Contract): Promise<number> =>
   (await contract.deployTransaction.wait()).blockNumber;
@@ -82,57 +83,19 @@ async function runtimeRecord(contract: Contract, artifactKey: ReleaseArtifactKey
 }
 
 async function main() {
-  const reviewedSource = loadReviewedSourceEvidence(
-    repositoryRoot(),
-    process.env.PERPDEX_REVIEWED_RELEASE_COMMIT,
-    process.env.PERPDEX_REVIEWED_SOURCE_TREE
-  );
-  const reviewedBuild = await collectReleaseBuildEvidence(artifacts);
   const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
   const verifierFile = path.resolve(
     process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
   );
+  const attestationFile = path.resolve(
+    process.env.PERPDEX_RELEASE_ATTESTATION_FILE || './config/galileo.release-attestation.local.json'
+  );
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
-
-  const expectedBuildEvidenceSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256,
-    'PERPDEX_REVIEWED_BUILD_EVIDENCE_SHA256'
-  );
-  const expectedProductConfigSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256,
-    'PERPDEX_REVIEWED_PRODUCT_CONFIG_SHA256'
-  );
-  const expectedVerifierConfigSha256 = requireReviewedSha256(
-    process.env.PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256,
-    'PERPDEX_REVIEWED_VERIFIER_PUBLIC_KEYS_SHA256'
-  );
-  const actualBuildEvidenceSha256 = releaseBuildEvidenceSha256(reviewedBuild);
-  if (actualBuildEvidenceSha256 !== expectedBuildEvidenceSha256) {
-    throw new Error(
-      `reviewed build evidence SHA-256 mismatch: expected ${expectedBuildEvidenceSha256}, got ${actualBuildEvidenceSha256}`
-    );
-  }
-  const productConfigSha256 = verifyConfigFileSha256(productsFile, expectedProductConfigSha256, 'product config');
-  const verifierPublicKeysSha256 = verifyConfigFileSha256(
-    verifierFile,
-    expectedVerifierConfigSha256,
-    'verifier public-key config'
-  );
-  const products = loadProducts(productsFile);
-  const verifierConfig = loadVerifierConfig(verifierFile);
-  const verifierPoints = verifierConfig.keys;
-
-  // All reviewer-pinned local evidence is checked above before any signer is loaded or transaction is sent.
   const network = await ethers.provider.getNetwork();
   if (network.chainId !== GALILEO_CHAIN_ID) {
     throw new Error(`refusing deployment: expected chain ${GALILEO_CHAIN_ID}, got ${network.chainId}`);
   }
 
-  const [deployer] = await ethers.getSigners();
-  const sequencer = requiredAddress(
-    process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
-    'PERPDEX_SEQUENCER_ADDRESS'
-  );
   const quote = requireGalileoUsdce(process.env.PERPDEX_QUOTE_TOKEN_ADDRESS);
   const quoteCode = await ethers.provider.getCode(quote);
   if (quoteCode === '0x') throw new Error('canonical quote token has no bytecode');
@@ -147,10 +110,29 @@ async function main() {
     throw new Error(`Galileo collateral metadata mismatch: expected ${GALILEO_USDCE_SYMBOL}/${GALILEO_USDCE_DECIMALS}`);
   }
 
-  // Fresh proxies only. This script never upgrades or adopts the old Fable set.
-  const Sanctions = await ethers.getContractFactory('MockSanctionsList');
-  const sanctions = await Sanctions.deploy();
-  await sanctions.deployed();
+  // The signed attestation and clean source tree are recomputed immediately before the first transaction.
+  const firstDeployment = await executeAfterVerifiedPreflight(
+    () => collectAndVerifyReleaseEvidence({ artifacts, productsFile, verifierFile, attestationFile }),
+    async (preflight: VerifiedReleaseEvidence) => {
+      const [deployer] = await ethers.getSigners();
+      const sequencer = requiredAddress(
+        process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
+        'PERPDEX_SEQUENCER_ADDRESS'
+      );
+      assertIndependentReleaseReviewer(preflight.reviewer.address, deployer.address, sequencer);
+      // Fresh contracts only. This is the first transaction-producing call in the script.
+      const Sanctions = await ethers.getContractFactory('MockSanctionsList');
+      const sanctions = await Sanctions.deploy();
+      await sanctions.deployed();
+      return { preflight, deployer, sequencer, sanctions };
+    }
+  );
+  const { preflight, deployer, sequencer, sanctions } = firstDeployment;
+  const reviewedBuild = preflight.build;
+  const products = preflight.products;
+  const verifierConfig = preflight.verifierConfig;
+  const verifierPoints = verifierConfig.keys;
+
   const Liq = await ethers.getContractFactory('ClearinghouseLiq');
   const clearinghouseLiq = await Liq.deploy();
   await clearinghouseLiq.deployed();
@@ -190,7 +172,7 @@ async function main() {
   );
 
   const VirtualBook = await ethers.getContractFactory('VirtualBook');
-  const markets: Record<string, any> = {};
+  const markets: Record<string, unknown> = {};
   for (const product of products.products) {
     const virtualBook = await VirtualBook.deploy(product.productId);
     await virtualBook.deployed();
@@ -277,87 +259,97 @@ async function main() {
   const spotEngineRecord = await proxyRecord(spotEngine, 'spotEngine', reviewedBuild);
   const perpEngineRecord = await proxyRecord(perpEngine, 'perpEngine', reviewedBuild);
   const offchainExchangeRecord = await proxyRecord(offchainExchange, 'offchainExchange', reviewedBuild);
-  const postVerifyBuildSha256 = releaseBuildEvidenceSha256(await collectReleaseBuildEvidence(artifacts));
-  if (postVerifyBuildSha256 !== expectedBuildEvidenceSha256) {
-    throw new Error(
-      `post-deploy build evidence SHA-256 mismatch: expected ${expectedBuildEvidenceSha256}, got ${postVerifyBuildSha256}`
-    );
-  }
-  verifyConfigFileSha256(productsFile, expectedProductConfigSha256, 'post-deploy product config');
-  verifyConfigFileSha256(verifierFile, expectedVerifierConfigSha256, 'post-deploy verifier public-key config');
 
-  const manifest = {
-    schemaVersion: 3,
-    release: 'bond-perpdex-galileo-audited-base',
-    source: {
-      auditedBaseCommit: AUDITED_BASE_COMMIT,
-      reviewedReleaseCommit: reviewedSource.releaseCommit,
-      reviewedSourceTree: reviewedSource.sourceTree,
-      compiler: reviewedBuild.compiler,
-      buildInfos: reviewedBuild.buildInfos,
-      artifacts: reviewedBuild.artifacts,
-      buildEvidenceSha256: actualBuildEvidenceSha256,
-      artifactRuntimeHashes: Object.fromEntries(
-        Object.entries(reviewedBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
-      ),
-      productConfigSha256,
-      verifierPublicKeysSha256,
-      explicitDeltas: [
-        'restore omitted Version.sol implementation',
-        'enforce OffchainExchange order signatures',
-        'emit DepositCollateralWithReferral for Bond settlement provenance',
-        'deploy unique non-custodial VirtualBook domains',
-        'pin product zero to existing Galileo USDC.e and require exact custody transfers',
-      ],
-    },
-    network: {
-      name: '0G Galileo Testnet',
-      chainId: GALILEO_CHAIN_ID,
-    },
-    deployer: deployer.address,
-    sequencer,
-    sequencerUsesDeployer: sequencer === deployer.address,
-    quoteToken: quote,
-    collateral: {
-      address: GALILEO_USDCE_ADDRESS,
-      symbol: GALILEO_USDCE_SYMBOL,
-      decimals: GALILEO_USDCE_DECIMALS,
-      productId: 0,
-      source: 'existing',
-      deployToken: false,
-    },
-    contracts: {
-      sanctions: sanctionsRecord,
-      clearinghouseLiq: clearinghouseLiqRecord,
-      verifier: verifierRecord,
-      endpoint: endpointRecord,
-      clearinghouse: clearinghouseRecord,
-      spotEngine: spotEngineRecord,
-      perpEngine: perpEngineRecord,
-      offchainExchange: offchainExchangeRecord,
-    },
-    markets,
-    gates: {
-      signedBatchAbiOnly: true,
-      orderSignaturesEnforced: true,
-      updatePerpBalanceAbsent: true,
-      slowModeExitPreserved: true,
-      productRiskConfigApproved: true,
-      reviewerPinnedBuildAndConfigHashes: true,
-      exactVerifierSignerCountAndBitmask: true,
-      exactLiveMarketConfiguration: true,
-      exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
-      collateralTokenDeploymentAbsent: true,
-    },
-  };
+  // A fresh signed-attestation and clean-tree verification gates manifest creation after all transactions.
+  await writeAfterVerifiedPostflight(
+    () => collectAndVerifyReleaseEvidence({ artifacts, productsFile, verifierFile, attestationFile }),
+    async (postflight: VerifiedReleaseEvidence) => {
+      assertSameVerifiedReleaseEvidence(preflight, postflight);
+      const finalBuild = postflight.build;
+      const manifest = {
+        schemaVersion: 4,
+        release: 'bond-perpdex-galileo-audited-base',
+        source: {
+          auditedBaseCommit: AUDITED_BASE_COMMIT,
+          reviewedReleaseCommit: postflight.source.releaseCommit,
+          reviewedSourceTree: postflight.source.sourceTree,
+          compiler: finalBuild.compiler,
+          buildInfos: finalBuild.buildInfos,
+          artifacts: finalBuild.artifacts,
+          buildEvidenceSha256: postflight.buildEvidenceSha256,
+          artifactRuntimeHashes: Object.fromEntries(
+            Object.entries(finalBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
+          ),
+          productConfigSha256: postflight.productConfigSha256,
+          verifierPublicKeysSha256: postflight.verifierConfigSha256,
+          reviewAttestation: {
+            policyFile: TRACKED_GALILEO_RELEASE_POLICY,
+            policyId: postflight.policy.policyId,
+            policyVersion: postflight.policy.policyVersion,
+            policySha256: postflight.policySha256,
+            digest: postflight.attestationDigest,
+            reviewer: postflight.reviewer,
+            signedAttestation: postflight.attestation,
+          },
+          explicitDeltas: [
+            'restore omitted Version.sol implementation',
+            'enforce OffchainExchange order signatures',
+            'emit DepositCollateralWithReferral for Bond settlement provenance',
+            'deploy unique non-custodial VirtualBook domains',
+            'pin product zero to existing Galileo USDC.e and require exact custody transfers',
+          ],
+        },
+        network: {
+          name: '0G Galileo Testnet',
+          chainId: GALILEO_CHAIN_ID,
+        },
+        deployer: deployer.address,
+        sequencer,
+        sequencerUsesDeployer: sequencer === deployer.address,
+        quoteToken: quote,
+        collateral: {
+          address: GALILEO_USDCE_ADDRESS,
+          symbol: GALILEO_USDCE_SYMBOL,
+          decimals: GALILEO_USDCE_DECIMALS,
+          productId: 0,
+          source: 'existing',
+          deployToken: false,
+        },
+        contracts: {
+          sanctions: sanctionsRecord,
+          clearinghouseLiq: clearinghouseLiqRecord,
+          verifier: verifierRecord,
+          endpoint: endpointRecord,
+          clearinghouse: clearinghouseRecord,
+          spotEngine: spotEngineRecord,
+          perpEngine: perpEngineRecord,
+          offchainExchange: offchainExchangeRecord,
+        },
+        markets,
+        gates: {
+          signedBatchAbiOnly: true,
+          orderSignaturesEnforced: true,
+          updatePerpBalanceAbsent: true,
+          slowModeExitPreserved: true,
+          productRiskConfigApproved: true,
+          reviewerSignedAttestationVerifiedPreAndPost: true,
+          deterministicApplicationSolc013Reproduction: true,
+          exactVerifierSignerCountAndBitmask: true,
+          exactLiveMarketConfiguration: true,
+          exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
+          collateralTokenDeploymentAbsent: true,
+        },
+      };
 
-  fs.mkdirSync(path.dirname(manifestFile), { recursive: true });
-  fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
-    mode: 0o600,
-    flag: 'wx',
-  });
-  console.log(`Galileo deployment manifest written to ${manifestFile}`);
-  console.log('No private keys or secret values were printed.');
+      fs.mkdirSync(path.dirname(manifestFile), { recursive: true });
+      fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
+        mode: 0o600,
+        flag: 'wx',
+      });
+      console.log(`Galileo deployment manifest written to ${manifestFile}`);
+      console.log('No private keys or secret values were printed.');
+    }
+  );
 }
 
 main().catch((error) => {
