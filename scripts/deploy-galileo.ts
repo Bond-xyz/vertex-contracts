@@ -30,15 +30,17 @@ import {
   verifyVirtualBookProductId,
 } from './release-evidence';
 import {
-  assertIndependentReleaseReviewer,
   assertDeploymentIntentAvailableForFirstTransaction,
-  assertSameVerifiedReleaseEvidence,
-  collectAndVerifyReleaseEvidence,
   executeAfterVerifiedPreflight,
   TRACKED_GALILEO_RELEASE_POLICY,
-  VerifiedReleaseEvidence,
   writeAfterVerifiedPostflight,
 } from './release-attestation';
+import {
+  assertSameVerifiedRedTestnetReleaseEvidence,
+  collectAndVerifyRedTestnetReleaseEvidence,
+  TRACKED_RED_GALILEO_APPROVAL,
+  VerifiedRedTestnetReleaseEvidence,
+} from './red-testnet-approval';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
@@ -171,9 +173,10 @@ async function main() {
   const verifierFile = path.resolve(
     process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
   );
-  const attestationFile = path.resolve(
-    process.env.PERPDEX_RELEASE_ATTESTATION_FILE || './config/galileo.release-attestation.local.json'
+  const productReviewFile = path.resolve(
+    process.env.PERPDEX_PRODUCT_REVIEW_FILE || './config/galileo.product-approval-review.json'
   );
+  const approvalFile = path.resolve(process.env.PERPDEX_RED_APPROVAL_FILE || TRACKED_RED_GALILEO_APPROVAL);
   const deploymentIntentFile = path.resolve(
     process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
   );
@@ -198,23 +201,23 @@ async function main() {
   }
   const preflightContractDiff = await collectContractInterfaceDiff();
 
-  // The signed attestation and clean source tree are recomputed immediately before the first transaction.
+  // The tracked Red testnet approval and exact candidate evidence are recomputed immediately before the first transaction.
   const firstDeployment = await executeAfterVerifiedPreflight(
     () =>
-      collectAndVerifyReleaseEvidence({
+      collectAndVerifyRedTestnetReleaseEvidence({
         artifacts,
         productsFile,
+        productReviewFile,
         verifierFile,
-        attestationFile,
+        approvalFile,
         deploymentIntentFile,
       }),
-    async (preflight: VerifiedReleaseEvidence) => {
+    async (preflight: VerifiedRedTestnetReleaseEvidence) => {
       const [deployer] = await ethers.getSigners();
       const sequencer = requiredAddress(
         process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
         'PERPDEX_SEQUENCER_ADDRESS'
       );
-      assertIndependentReleaseReviewer(preflight.reviewer.address, deployer.address, sequencer);
       const openZeppelinManifest = await Manifest.forNetwork(hardhatNetwork.provider);
       assertFreshOpenZeppelinManifestAbsent(path.resolve(__dirname, '..'), GALILEO_CHAIN_ID, openZeppelinManifest.file);
       const latestBlock = await ethers.provider.getBlock('latest');
@@ -233,7 +236,7 @@ async function main() {
         sanctions.address !== preflight.deploymentIntent.expectedFirstContract ||
         sanctions.deployTransaction.nonce !== preflight.deploymentIntent.firstTransactionNonce
       ) {
-        throw new Error('first deployment transaction does not match signed deployment intent');
+        throw new Error('first deployment transaction does not match Red-approved single-use deployment intent');
       }
       await sanctions.deployed();
       return { preflight, deployer, sequencer, sanctions, openZeppelinManifestFile: openZeppelinManifest.file };
@@ -462,25 +465,26 @@ async function main() {
     preflight.deploymentIntent.firstTransactionNonce
   );
 
-  // A fresh signed-attestation and clean-tree verification gates manifest creation after all transactions.
+  // The tracked Red approval and clean candidate boundary gate manifest creation after all transactions.
   await writeAfterVerifiedPostflight(
     () =>
-      collectAndVerifyReleaseEvidence({
+      collectAndVerifyRedTestnetReleaseEvidence({
         artifacts,
         productsFile,
+        productReviewFile,
         verifierFile,
-        attestationFile,
+        approvalFile,
         deploymentIntentFile,
       }),
-    async (postflight: VerifiedReleaseEvidence) => {
-      assertSameVerifiedReleaseEvidence(preflight, postflight);
+    async (postflight: VerifiedRedTestnetReleaseEvidence) => {
+      assertSameVerifiedRedTestnetReleaseEvidence(preflight, postflight);
       const finalBuild = postflight.build;
       const finalContractDiff = await collectContractInterfaceDiff();
       if (finalContractDiff.sha256 !== preflightContractDiff.sha256) {
         throw new Error('contract interface diff changed after deployment transactions');
       }
       const manifest = {
-        schemaVersion: 6,
+        schemaVersion: 7,
         release: GALILEO_RELEASE_ID,
         deploymentIntent: postflight.deploymentIntent,
         openZeppelin: {
@@ -500,15 +504,17 @@ async function main() {
             Object.entries(finalBuild.artifacts).map(([key, artifact]) => [key, artifact.runtimeCodeHash])
           ),
           productConfigSha256: postflight.productConfigSha256,
+          productReviewSha256: postflight.productReviewSha256,
           verifierPublicKeysSha256: postflight.verifierConfigSha256,
-          reviewAttestation: {
+          redTestnetApproval: {
             policyFile: TRACKED_GALILEO_RELEASE_POLICY,
             policyId: postflight.policy.policyId,
             policyVersion: postflight.policy.policyVersion,
             policySha256: postflight.policySha256,
-            digest: postflight.attestationDigest,
-            reviewer: postflight.reviewer,
-            signedAttestation: postflight.attestation,
+            approvalFile: TRACKED_RED_GALILEO_APPROVAL,
+            approvalSha256: postflight.approvalSha256,
+            digest: postflight.approvalDigest,
+            approval: postflight.approval,
           },
           explicitDeltas: [
             'restore omitted Version.sol implementation',
@@ -532,7 +538,12 @@ async function main() {
         roles: {
           deployer: deployer.address,
           sequencer,
-          independentReleaseReviewer: postflight.reviewer,
+          releaseApprover: {
+            name: 'Red',
+            role: 'product_and_release_owner',
+            mode: 'tracked_galileo_testnet_artifact',
+          },
+          mainnetExternalReviewRequired: true,
           contractOwner: deployer.address,
           proxyAdminOwner: deployer.address,
           verifierKeys: {
@@ -607,7 +618,9 @@ async function main() {
           updatePerpBalanceAbsent: true,
           slowModeExitPreserved: true,
           productRiskConfigApproved: true,
-          reviewerSignedAttestationVerifiedPreAndPost: true,
+          trackedRedTestnetApprovalVerifiedPreAndPost: true,
+          deterministicCiAndIndependentAgentReviewBound: true,
+          mainnetExternalReviewWaived: false,
           signedDeploymentIntentSingleUseNonce: true,
           freshOpenZeppelinNetworkManifest: true,
           implementationAndAdminCreationProvenance: true,

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "policyId": "bond-perpdex-galileo-testnet-release",
-  "policyVersion": 2,
+  "policyVersion": 3,
   "projectId": "g-bond",
   "releaseId": "bond-perpdex-galileo-audited-base",
   "attestationDomain": {
@@ -15,7 +15,10 @@
     "symbol": "USDC.e",
     "decimals": 6
   },
-  "requiredReviewerSignatures": 1,
+  "approvalMode": "tracked_red_testnet_approval",
+  "requiredReviewerSignatures": 0,
   "reviewers": [],
-  "status": "blocked_pending_named_reviewer_and_product_approval"
+  "redApprovalArtifact": "config/galileo.red-testnet-approval.json",
+  "mainnetExternalReviewRequired": true,
+  "status": "blocked_pending_red_tracked_approval_and_product_approval"
 }

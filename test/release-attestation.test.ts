@@ -59,8 +59,11 @@ function fixturePolicy(reviewer: Wallet): GalileoReleasePolicy {
       symbol: 'USDC.e',
       decimals: 6,
     },
+    approvalMode: 'external_reviewer_signature',
     requiredReviewerSignatures: 1,
     reviewers: [{ name: 'Fixture Reviewer', address: reviewer.address }],
+    redApprovalArtifact: null,
+    mainnetExternalReviewRequired: true,
     status: 'approved_for_galileo_testnet_release',
   });
 }

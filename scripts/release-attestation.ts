@@ -44,8 +44,11 @@ export type GalileoReleasePolicy = {
   attestationDomain: { name: string; version: string };
   chainId: number;
   collateral: { address: string; productId: number; symbol: string; decimals: number };
+  approvalMode: 'external_reviewer_signature' | 'tracked_red_testnet_approval';
   requiredReviewerSignatures: number;
   reviewers: GalileoReleaseReviewer[];
+  redApprovalArtifact: string | null;
+  mainnetExternalReviewRequired: boolean;
   status: string;
 };
 
@@ -334,8 +337,11 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
       'attestationDomain',
       'chainId',
       'collateral',
+      'approvalMode',
       'requiredReviewerSignatures',
       'reviewers',
+      'redApprovalArtifact',
+      'mainnetExternalReviewRequired',
       'status',
     ],
     'release policy'
@@ -372,9 +378,6 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
   ) {
     throw new Error('release policy must pin exact Galileo USDC.e collateral');
   }
-  if (policy.requiredReviewerSignatures !== 1) {
-    throw new Error('release policy currently requires exactly one signed reviewer attestation');
-  }
   if (!Array.isArray(policy.reviewers)) throw new Error('release policy reviewers must be an array');
   const normalizedReviewers = policy.reviewers.map((reviewer, index) => {
     exactKeys(reviewer as unknown as Record<string, unknown>, ['name', 'address'], `release reviewer ${index}`);
@@ -383,6 +386,25 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
   });
   if (new Set(normalizedReviewers.map((reviewer) => reviewer.address)).size !== normalizedReviewers.length) {
     throw new Error('release policy reviewer addresses must be unique');
+  }
+  if (policy.mainnetExternalReviewRequired !== true) {
+    throw new Error('Galileo testnet policy must not waive mainnet external review');
+  }
+  if (policy.approvalMode === 'external_reviewer_signature') {
+    if (policy.requiredReviewerSignatures !== 1 || policy.redApprovalArtifact !== null) {
+      throw new Error('external reviewer policy requires one signature and no Red approval artifact');
+    }
+  } else if (policy.approvalMode === 'tracked_red_testnet_approval') {
+    if (
+      policy.chainId !== GALILEO_CHAIN_ID ||
+      policy.requiredReviewerSignatures !== 0 ||
+      normalizedReviewers.length !== 0 ||
+      policy.redApprovalArtifact !== 'config/galileo.red-testnet-approval.json'
+    ) {
+      throw new Error('tracked Red approval is restricted to Galileo testnet with no synthetic reviewer wallet');
+    }
+  } else {
+    throw new Error(`unsupported release approval mode: ${policy.approvalMode}`);
   }
   return { ...policy, reviewers: normalizedReviewers };
 }
@@ -465,6 +487,9 @@ export function verifySignedReleaseAttestation(
   expectedPayload: ReleaseAttestationPayload,
   attestation: SignedReleaseAttestation
 ): VerifiedReleaseAttestation {
+  if (policy.approvalMode !== 'external_reviewer_signature') {
+    throw new Error('signed external reviewer attestations are not the configured Galileo testnet approval mode');
+  }
   if (policy.status !== ACTIVE_GALILEO_RELEASE_POLICY_STATUS) {
     throw new Error(`release policy status is not active: ${policy.status}`);
   }

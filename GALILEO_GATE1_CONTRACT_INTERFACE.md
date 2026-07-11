@@ -141,8 +141,10 @@ prove final token custody conservation before retiring the graph.
 
 ## Deployment, verification, and abandonment
 
-The release remains fail-closed while the tracked reviewer list is empty or `config/galileo.products.json` has
-`approved: false`. No script selects reviewer identities, verifier private keys, or risk parameters.
+The release remains fail-closed while the tracked Red Galileo-testnet approval is absent, the product-vector review
+contains a mismatch, or `config/galileo.products.json` has `approved: false`. Galileo testnet does not invent a second
+human reviewer wallet; its tracked approval must bind exact candidate, build, config, CI, agent-review, and deployment-
+intent evidence. Mainnet external review remains required. No script selects verifier custody or risk parameters.
 
 `corepack yarn diff:galileo` verifies the current ABI, storage prefix, compiler settings, runtime hashes, and Endpoint
 size against the exact reviewed candidate. The fresh deployment manifest records that diff, all roles, exact product

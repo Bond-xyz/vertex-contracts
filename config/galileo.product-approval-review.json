@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "reviewId": "bond-perpdex-galileo-product-vectors",
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "contractSource": {
+    "repository": "Bond-xyz/vertex-contracts",
+    "releaseCommit": "9fa1d37e2f6dfcbc695f28d69b593e65e9457de3",
+    "productsFile": "config/galileo.products.json"
+  },
+  "rustSource": {
+    "repository": "Bond-xyz/perpdex-rust-backend",
+    "releaseCommit": "3a37af92b4e31b1f35413554d72f062a10d82f2e",
+    "symbolsFile": "core/types/src/symbol.rs",
+    "baseDecimals": 8
+  },
+  "riskModel": {
+    "initialMarginPercent": "5",
+    "maintenanceMarginPercent": "2.5",
+    "maximumLeverage": "20",
+    "weightStorageDecimals": 9,
+    "contractWeightDecimals": 18
+  },
+  "markets": [
+    {
+      "productId": 2,
+      "symbol": "BTCUSDCPERP",
+      "contractSizeIncrement": "0.001",
+      "contractMinimumSize": "0.001",
+      "rustSizeIncrement": "0.001",
+      "rustMinimumSize": "0.001",
+      "status": "match"
+    },
+    {
+      "productId": 4,
+      "symbol": "ETHUSDCPERP",
+      "contractSizeIncrement": "0.001",
+      "contractMinimumSize": "0.01",
+      "rustSizeIncrement": "0.001",
+      "rustMinimumSize": "0.01",
+      "status": "match"
+    },
+    {
+      "productId": 6,
+      "symbol": "SOLUSDCPERP",
+      "contractSizeIncrement": "0.01",
+      "contractMinimumSize": "0.1",
+      "rustSizeIncrement": "0.01",
+      "rustMinimumSize": "0.1",
+      "status": "match"
+    },
+    {
+      "productId": 8,
+      "symbol": "0GUSDCPERP",
+      "contractSizeIncrement": "1",
+      "contractMinimumSize": "10",
+      "rustSizeIncrement": "0.001",
+      "rustMinimumSize": "0.001",
+      "status": "blocked_mismatch"
+    }
+  ],
+  "checks": {
+    "collateralUnits": "pass",
+    "riskWeightConversion": "pass",
+    "btcMarketUnits": "pass",
+    "ethMarketUnits": "pass",
+    "solMarketUnits": "pass",
+    "zeroGMarketUnits": "blocked_mismatch"
+  },
+  "blockers": [
+    "0GUSDCPERP contract step/minimum are 1/10 while Rust step/minimum are 0.001/0.001; align Rust and frontend metadata to the approved contract values before release approval"
+  ],
+  "approval": {
+    "approved": false,
+    "approver": "Red",
+    "decision": "pending_exact_vector_confirmation",
+    "approvedAt": null
+  }
+}

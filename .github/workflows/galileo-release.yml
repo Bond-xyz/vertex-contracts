@@ -1,0 +1,51 @@
+name: Galileo deterministic release gate
+
+on:
+  pull_request:
+    branches:
+      - bond/galileo-refork
+  push:
+    branches:
+      - bond/galileo-refork
+      - codex/perpdex-contract-monday-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full release history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install pinned dependencies
+        run: |
+          corepack enable
+          HUSKY=0 corepack yarn install --frozen-lockfile --ignore-engines
+
+      - name: compile
+        run: corepack yarn force-compile
+
+      - name: contract-interface-diff
+        run: corepack yarn diff:galileo
+
+      - name: product-vector-review
+        run: corepack yarn review:galileo:products
+
+      - name: release-tests
+        run: corepack yarn test:release
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
