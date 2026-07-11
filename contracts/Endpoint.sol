@@ -121,8 +121,11 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
 
         slowModeConfig = SlowModeConfig({timeout: 0, txCount: 0, txUpTo: 0});
 
-        for (uint32 i = 0; i < initialPrices.length; i++) {
+        for (uint32 i = 0; i < initialPrices.length; ) {
             priceX18[i] = initialPrices[i];
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -133,7 +136,10 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
     // we block those functions unless there has been a deposit first
     function _recordSubaccount(bytes32 subaccount) internal {
         if (subaccountIds[subaccount] == 0) {
-            subaccountIds[subaccount] = ++numSubaccounts;
+            unchecked {
+                ++numSubaccounts;
+            }
+            subaccountIds[subaccount] = numSubaccounts;
             subaccounts[numSubaccounts] = subaccount;
         }
     }
@@ -146,31 +152,26 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
     }
 
     function validateNonce(bytes32 sender, uint64 nonce) internal virtual {
-        require(
-            nonce == nonces[address(uint160(bytes20(sender)))]++,
-            ERR_WRONG_NONCE
-        );
+        address account = address(uint160(bytes20(sender)));
+        uint64 expected = nonces[account];
+        require(nonce == expected, ERR_WRONG_NONCE);
+        unchecked {
+            nonces[account] = expected + 1;
+        }
     }
 
     function chargeFee(bytes32 sender, int128 fee) internal {
         chargeFee(sender, fee, QUOTE_PRODUCT_ID);
     }
 
-    function chargeFee(
-        bytes32 sender,
-        int128 fee,
-        uint32 productId
-    ) internal {
+    function chargeFee(bytes32 sender, int128 fee, uint32 productId) internal {
         spotEngine.updateBalance(productId, sender, -fee);
         sequencerFee[productId] += fee;
     }
 
-    function getLinkedSigner(bytes32 subaccount)
-        public
-        view
-        virtual
-        returns (address)
-    {
+    function getLinkedSigner(
+        bytes32 subaccount
+    ) public view virtual returns (address) {
         // if (RiskHelper.isFrontendAccount(subaccount)) {
         //     return linkedSigners[RiskHelper.defaultFrontendAccount(subaccount)];
         // } else {
@@ -223,8 +224,14 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         address from,
         uint256 amount
     ) internal {
+        uint256 custodyBalanceBefore = token.balanceOf(address(clearinghouse));
         safeTransferFrom(token, from, amount);
         safeTransferTo(token, address(clearinghouse), amount);
+        require(
+            token.balanceOf(address(clearinghouse)) ==
+                custodyBalanceBefore + amount,
+            ERR_TRANSFER_FAILED
+        );
     }
 
     function validateSender(bytes32 txSender, address sender) internal view {
@@ -235,9 +242,10 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         );
     }
 
-    function setReferralCode(address sender, string memory referralCode)
-        internal
-    {
+    function setReferralCode(
+        address sender,
+        string memory referralCode
+    ) internal {
         if (bytes(referralCodes[sender]).length == 0) {
             referralCodes[sender] = referralCode;
         }
@@ -276,6 +284,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         uint128 amount,
         string memory referralCode
     ) public {
+        if (clearinghouse.getReleaseMode() != IClearinghouse.ReleaseMode.ACTIVE)
+            revert DepositsDisabled();
+        require(productId == QUOTE_PRODUCT_ID, ERR_INVALID_PRODUCT);
         require(bytes(referralCode).length != 0, ERR_INVALID_REFERRAL_CODE);
 
         address sender = address(bytes20(subaccount));
@@ -298,7 +309,11 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
 
         // hardcoded to three days
         uint64 executableAt = uint64(block.timestamp) + 259200;
-        slowModeTxs[_slowModeConfig.txCount++] = SlowModeTx({
+        uint64 slowModeIndex = _slowModeConfig.txCount;
+        unchecked {
+            ++_slowModeConfig.txCount;
+        }
+        slowModeTxs[slowModeIndex] = SlowModeTx({
             executableAt: executableAt,
             sender: sender,
             tx: abi.encodePacked(
@@ -313,6 +328,12 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
             )
         });
         slowModeConfig = _slowModeConfig;
+        emit DepositCollateralWithReferral(
+            subaccount,
+            productId,
+            amount,
+            referralCode
+        );
     }
 
     function requireUnsanctioned(address sender) internal view virtual {
@@ -353,14 +374,20 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         } else {
             IERC20Base token = _getQuote();
             safeTransferFrom(token, sender, uint256(int256(SLOW_MODE_FEE)));
-            slowModeFees += SLOW_MODE_FEE;
+            unchecked {
+                slowModeFees += SLOW_MODE_FEE;
+            }
         }
 
         SlowModeConfig memory _slowModeConfig = slowModeConfig;
         // hardcoded to three days
         uint64 executableAt = uint64(block.timestamp) + 259200;
         requireUnsanctioned(sender);
-        slowModeTxs[_slowModeConfig.txCount++] = SlowModeTx({
+        uint64 slowModeIndex = _slowModeConfig.txCount;
+        unchecked {
+            ++_slowModeConfig.txCount;
+        }
+        slowModeTxs[slowModeIndex] = SlowModeTx({
             executableAt: executableAt,
             sender: sender,
             tx: transaction
@@ -379,8 +406,12 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
             _slowModeConfig.txUpTo < _slowModeConfig.txCount,
             ERR_NO_SLOW_MODE_TXS_REMAINING
         );
-        SlowModeTx memory txn = slowModeTxs[_slowModeConfig.txUpTo];
-        delete slowModeTxs[_slowModeConfig.txUpTo++];
+        uint64 slowModeIndex = _slowModeConfig.txUpTo;
+        SlowModeTx memory txn = slowModeTxs[slowModeIndex];
+        delete slowModeTxs[slowModeIndex];
+        unchecked {
+            ++_slowModeConfig.txUpTo;
+        }
 
         require(
             fromSequencer || (txn.executableAt <= block.timestamp),
@@ -406,6 +437,7 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
             }
 
             // try return funds now removed
+            emit SlowModeTransactionFailed(slowModeIndex);
         }
     }
 
@@ -650,9 +682,12 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
             );
             uint32[] memory spotIds = spotEngine.getProductIds();
             int128[] memory fees = new int128[](spotIds.length);
-            for (uint256 i = 0; i < spotIds.length; i++) {
+            for (uint256 i = 0; i < spotIds.length; ) {
                 fees[i] = sequencerFee[spotIds[i]];
                 sequencerFee[spotIds[i]] = 0;
+                unchecked {
+                    ++i;
+                }
             }
             clearinghouse.claimSequencerFees(txn, fees);
         } else if (txType == TransactionType.ManualAssert) {
@@ -745,16 +780,24 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         // we should probably record this, and engage some sort of recovery mode
 
         bytes32 digest = keccak256(abi.encode(idx));
-        for (uint256 i = 0; i < transactions.length; ++i) {
+        for (uint256 i = 0; i < transactions.length; ) {
             digest = keccak256(abi.encodePacked(digest, transactions[i]));
+            unchecked {
+                ++i;
+            }
         }
         verifier.requireValidSignature(digest, e, s, 7);
 
-        for (uint256 i = 0; i < transactions.length; i++) {
+        for (uint256 i = 0; i < transactions.length; ) {
             bytes calldata transaction = transactions[i];
             processTransaction(transaction);
+            unchecked {
+                ++i;
+            }
         }
-        nSubmissions += uint64(transactions.length);
+        unchecked {
+            nSubmissions += uint64(transactions.length);
+        }
     }
 
     function submitTransactionsCheckedWithGasLimit(
@@ -764,21 +807,22 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
     ) external {
         uint256 gasUsed = gasleft();
         require(idx == nSubmissions, ERR_INVALID_SUBMISSION_INDEX);
-        for (uint256 i = 0; i < transactions.length; i++) {
+        for (uint256 i = 0; i < transactions.length; ) {
             bytes calldata transaction = transactions[i];
             processTransaction(transaction);
             if (gasUsed - gasleft() > gasLimit) {
                 verifier.revertGasInfo(i, gasUsed);
             }
+            unchecked {
+                ++i;
+            }
         }
         verifier.revertGasInfo(transactions.length, gasUsed - gasleft());
     }
 
-    function getSubaccountId(bytes32 subaccount)
-        external
-        view
-        returns (uint64)
-    {
+    function getSubaccountId(
+        bytes32 subaccount
+    ) external view returns (uint64) {
         return subaccountIds[subaccount];
     }
 
@@ -787,11 +831,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return token;
     }
 
-    function getPriceX18(uint32 productId)
-        public
-        view
-        returns (int128 _priceX18)
-    {
+    function getPriceX18(
+        uint32 productId
+    ) public view returns (int128 _priceX18) {
         _priceX18 = priceX18[productId];
         require(_priceX18 != 0, ERR_INVALID_PRODUCT);
     }
@@ -815,15 +857,9 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return sequencer;
     }
 
-    function getSlowModeTx(uint64 idx)
-        external
-        view
-        returns (
-            SlowModeTx memory,
-            uint64,
-            uint64
-        )
-    {
+    function getSlowModeTx(
+        uint64 idx
+    ) external view returns (SlowModeTx memory, uint64, uint64) {
         return (
             slowModeTxs[idx],
             slowModeConfig.txUpTo,
@@ -835,10 +871,10 @@ contract Endpoint is IEndpoint, EIP712Upgradeable, OwnableUpgradeable, Version {
         return nonces[sender];
     }
 
-    function registerTransferableWallet(address wallet, bool _transferable)
-        external
-        onlyOwner
-    {
+    function registerTransferableWallet(
+        address wallet,
+        bool _transferable
+    ) external onlyOwner {
         transferableWallets[wallet] = true;
     }
 }

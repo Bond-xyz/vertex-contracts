@@ -13,6 +13,12 @@ interface IClearinghouse is
     IEndpointGated,
     IVersion
 {
+    enum ReleaseMode {
+        ACTIVE,
+        CLOSE_ONLY,
+        WITHDRAWALS_ONLY
+    }
+
     function addEngine(
         address engine,
         address offchainExchange,
@@ -78,6 +84,10 @@ interface IClearinghouse is
     function upgradeClearinghouseLiq(address _clearinghouseLiq) external;
 
     function getClearinghouseLiq() external view returns (address);
+
+    function getReleaseMode() external view returns (ReleaseMode);
+
+    function setReleaseMode(ReleaseMode newMode) external;
 
     function burnLpAndTransfer(IEndpoint.BurnLpAndTransfer calldata txn)
         external;

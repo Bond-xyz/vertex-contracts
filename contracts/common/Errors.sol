@@ -126,3 +126,10 @@ string constant ERR_MAX_UTILIZATION = "MU";
 string constant ERR_INVALID_RISK_GROUP = "IRG";
 
 string constant ERR_VERIFY_SCHNORR = "VSR";
+
+// Fresh-deployment-only Bond release controls.
+error DepositsDisabled();
+error NewOrdersDisabled();
+error ReleaseModeRegression();
+error ExitModeRequiresCloseOnly();
+error ExitModeLiabilitiesRemain(uint32 productId);

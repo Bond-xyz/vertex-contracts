@@ -6,6 +6,13 @@ import "./IVersion.sol";
 
 interface IEndpoint is IVersion {
     event SubmitTransactions();
+    event SlowModeTransactionFailed(uint64 indexed index);
+    event DepositCollateralWithReferral(
+        bytes32 indexed subaccount,
+        uint32 indexed productId,
+        uint128 amount,
+        string referralCode
+    );
 
     // events that we parse transactions into
     enum TransactionType {

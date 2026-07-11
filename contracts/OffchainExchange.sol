@@ -274,6 +274,20 @@ contract OffchainExchange is
         return ((expiration >> 61) & 1) == 1;
     }
 
+    function _requireOrderAllowed(
+        IClearinghouse.ReleaseMode mode,
+        IEndpoint.Order memory order
+    ) internal pure {
+        if (mode == IClearinghouse.ReleaseMode.WITHDRAWALS_ONLY)
+            revert NewOrdersDisabled();
+        if (
+            mode == IClearinghouse.ReleaseMode.CLOSE_ONLY &&
+            order.sender != X_ACCOUNT
+        ) {
+            if (!_isReduceOnly(order.expiration)) revert NewOrdersDisabled();
+        }
+    }
+
     function _validateOrder(
         CallState memory callState,
         MarketInfo memory,
@@ -309,12 +323,12 @@ contract OffchainExchange is
 
         return
             (order.priceX18 > 0) &&
-            //            _checkSignature(
-            //                order.sender,
-            //                orderDigest,
-            //                linkedSigner,
-            //                signedOrder.signature
-            //            ) &&
+            _checkSignature(
+                order.sender,
+                orderDigest,
+                linkedSigner,
+                signedOrder.signature
+            ) &&
             // valid amount
             (order.amount != 0) &&
             !_expired(order.expiration);
@@ -513,6 +527,7 @@ contract OffchainExchange is
         IEndpoint.MatchOrderAMM calldata txn,
         address takerLinkedSigner
     ) external onlyEndpoint {
+        _requireOrderAllowed(clearinghouse.getReleaseMode(), txn.taker.order);
         CallState memory callState = _getCallState(txn.productId);
         MarketInfo memory market = getMarketInfo(txn.productId);
         bytes32 takerDigest = getDigest(txn.productId, txn.taker.order);
@@ -591,6 +606,9 @@ contract OffchainExchange is
         external
         onlyEndpoint
     {
+        IClearinghouse.ReleaseMode mode = clearinghouse.getReleaseMode();
+        _requireOrderAllowed(mode, txn.matchOrders.taker.order);
+        _requireOrderAllowed(mode, txn.matchOrders.maker.order);
         CallState memory callState = _getCallState(txn.matchOrders.productId);
         int128 takerAmount;
         int128 takerFee;
@@ -710,6 +728,8 @@ contract OffchainExchange is
     }
 
     function swapAMM(IEndpoint.SwapAMM calldata txn) external onlyEndpoint {
+        if (clearinghouse.getReleaseMode() != IClearinghouse.ReleaseMode.ACTIVE)
+            revert NewOrdersDisabled();
         MarketInfo memory market = getMarketInfo(txn.productId);
         CallState memory callState = _getCallState(txn.productId);
 

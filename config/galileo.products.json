@@ -1,0 +1,67 @@
+{
+  "chainId": 16602,
+  "approved": false,
+  "approval": {
+    "owner": "PENDING_RED_CONFIRMATION",
+    "reason": "The X18 conversion and 20x risk weights must be confirmed against the Rust settlement golden vectors before deployment."
+  },
+  "spreads": "0",
+  "products": [
+    {
+      "symbol": "BTCUSDCPERP",
+      "productId": 2,
+      "sizeIncrementX18": "1000000000000000",
+      "minSizeX18": "1000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 950000000,
+        "shortWeightInitial": 1050000000,
+        "longWeightMaintenance": 975000000,
+        "shortWeightMaintenance": 1025000000,
+        "priceX18": "100000000000000000000000"
+      }
+    },
+    {
+      "symbol": "ETHUSDCPERP",
+      "productId": 4,
+      "sizeIncrementX18": "1000000000000000",
+      "minSizeX18": "10000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 950000000,
+        "shortWeightInitial": 1050000000,
+        "longWeightMaintenance": 975000000,
+        "shortWeightMaintenance": 1025000000,
+        "priceX18": "3000000000000000000000"
+      }
+    },
+    {
+      "symbol": "SOLUSDCPERP",
+      "productId": 6,
+      "sizeIncrementX18": "10000000000000000",
+      "minSizeX18": "100000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 950000000,
+        "shortWeightInitial": 1050000000,
+        "longWeightMaintenance": 975000000,
+        "shortWeightMaintenance": 1025000000,
+        "priceX18": "150000000000000000000"
+      }
+    },
+    {
+      "symbol": "0GUSDCPERP",
+      "productId": 8,
+      "sizeIncrementX18": "1000000000000000000",
+      "minSizeX18": "10000000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 950000000,
+        "shortWeightInitial": 1050000000,
+        "longWeightMaintenance": 975000000,
+        "shortWeightMaintenance": 1025000000,
+        "priceX18": "1000000000000000000"
+      }
+    }
+  ]
+}
