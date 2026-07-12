@@ -4,7 +4,11 @@ import path from 'path';
 import { expect } from 'chai';
 import { GALILEO_USDCE_ADDRESS, loadProducts, resolveProductsWithStorkPrices } from '../scripts/deployment-config';
 import {
+  APPROVED_STORK_COHERENCE_DECISION,
+  APPROVED_STORK_DEPLOYMENT_POLICY_STATUS,
   BACKEND_PROTOCOL_BASELINE_COMMIT,
+  BLOCKED_STORK_COHERENCE_DECISION,
+  BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS,
   assertStorkDeploymentSnapshotFresh,
   assertStorkSnapshotObservationTime,
   collectGalileoStaticReleasePolicy,
@@ -73,8 +77,9 @@ describe('Galileo signed Stork deployment packet', () => {
     policy.coherence = {
       maxSignedTimestampSpreadSeconds: 3,
       decisionOwner: 'Red',
-      decision: 'fixture_reviewed_value',
+      decision: APPROVED_STORK_COHERENCE_DECISION,
     };
+    policy.status = APPROVED_STORK_DEPLOYMENT_POLICY_STATUS;
     fs.writeFileSync(
       path.join(temporaryRoot, 'config', 'galileo.stork-deployment-policy.json'),
       JSON.stringify(policy)
@@ -219,7 +224,8 @@ describe('Galileo signed Stork deployment packet', () => {
     expect(policy.feeds.map((feed) => feed.feedId)).to.deep.equal(['BTCUSD', 'ETHUSD', 'SOLUSD', '0GUSD']);
     expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
     expect(policy.coherence.decisionOwner).to.equal('Red');
-    expect(policy.coherence.decision).to.equal('pending_explicit_red_policy_input');
+    expect(policy.status).to.equal(BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS);
+    expect(policy.coherence.decision).to.equal(BLOCKED_STORK_COHERENCE_DECISION);
     expect(() =>
       validateStorkDeploymentSnapshot(
         {
@@ -256,7 +262,12 @@ describe('Galileo signed Stork deployment packet', () => {
     const { policy } = loadTrackedStorkDeploymentPolicy();
     const withSpread = (maxSignedTimestampSpreadSeconds: number) => ({
       ...policy,
-      coherence: { ...policy.coherence, maxSignedTimestampSpreadSeconds },
+      status: APPROVED_STORK_DEPLOYMENT_POLICY_STATUS,
+      coherence: {
+        ...policy.coherence,
+        maxSignedTimestampSpreadSeconds,
+        decision: APPROVED_STORK_COHERENCE_DECISION,
+      },
     });
 
     for (const invalidSpread of [0, -1, policy.verifier.maxAgeSeconds + 1]) {
@@ -268,6 +279,44 @@ describe('Galileo signed Stork deployment packet', () => {
       expect(() => validateStorkDeploymentPolicy(withSpread(validSpread))).not.to.throw();
     }
     expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
+  });
+
+  it('pins exact blocked and approved Stork policy state pairs and rejects arbitrary or mixed states', () => {
+    const { policy } = loadTrackedStorkDeploymentPolicy();
+    const approved = {
+      ...policy,
+      status: APPROVED_STORK_DEPLOYMENT_POLICY_STATUS,
+      coherence: {
+        ...policy.coherence,
+        maxSignedTimestampSpreadSeconds: 3,
+        decision: APPROVED_STORK_COHERENCE_DECISION,
+      },
+    };
+
+    expect(() => validateStorkDeploymentPolicy(policy)).not.to.throw();
+    expect(() => validateStorkDeploymentPolicy(approved)).not.to.throw();
+
+    for (const candidate of [
+      { ...approved, status: 'approved' },
+      { ...approved, status: BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS },
+      { ...approved, coherence: { ...approved.coherence, decision: 'reviewed' } },
+      { ...approved, coherence: { ...approved.coherence, decision: BLOCKED_STORK_COHERENCE_DECISION } },
+    ]) {
+      expect(() => validateStorkDeploymentPolicy(candidate)).to.throw(
+        'reviewed cross-feed signed timestamp spread must use the exact approved Galileo testnet state'
+      );
+    }
+
+    for (const candidate of [
+      { ...policy, status: APPROVED_STORK_DEPLOYMENT_POLICY_STATUS },
+      { ...policy, status: 'blocked' },
+      { ...policy, coherence: { ...policy.coherence, decision: APPROVED_STORK_COHERENCE_DECISION } },
+      { ...policy, coherence: { ...policy.coherence, decision: 'pending' } },
+    ]) {
+      expect(() => validateStorkDeploymentPolicy(candidate)).to.throw(
+        'unset cross-feed signed timestamp spread must remain explicitly fail-closed pending Red'
+      );
+    }
   });
 
   it('accepts the official signed BTC proof byte-for-byte and rejects a tampered X18 price', () => {
