@@ -6,7 +6,7 @@ import { BigNumber, BigNumberish, Contract, providers, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
 import appSolc = require('solc-0.8.13');
 import proxySolc = require('solc-0.8.9');
-import type { GalileoProducts } from './deployment-config';
+import type { GalileoDeploymentProducts } from './deployment-config';
 
 export const EIP170_MAX_RUNTIME_BYTES = 24_576;
 // Keep a small hard margin below EIP-170 so CI fails before an undeployable build.
@@ -869,7 +869,7 @@ function tupleValue(value: unknown, name: string, index: number): unknown {
 
 export async function verifyLiveMarketConfiguration(
   contracts: LiveMarketContracts,
-  reviewedConfig: Pick<GalileoProducts, 'spreads' | 'products'>,
+  reviewedConfig: Pick<GalileoDeploymentProducts, 'spreads' | 'products'>,
   expectedQuoteToken: string
 ): Promise<void> {
   const expectedProductIds = reviewedConfig.products.map((product) => product.productId);

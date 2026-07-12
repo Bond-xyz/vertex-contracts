@@ -29,8 +29,11 @@ export type ProductConfig = {
     shortWeightInitial: number;
     longWeightMaintenance: number;
     shortWeightMaintenance: number;
-    priceX18: string;
   };
+};
+
+export type DeploymentProductConfig = ProductConfig & {
+  risk: ProductConfig['risk'] & { priceX18: string };
 };
 
 export type GalileoProducts = {
@@ -38,6 +41,10 @@ export type GalileoProducts = {
   approved: boolean;
   spreads: string;
   products: ProductConfig[];
+};
+
+export type GalileoDeploymentProducts = Omit<GalileoProducts, 'products'> & {
+  products: DeploymentProductConfig[];
 };
 
 export type VerifierPoint = { x: string; y: string };
@@ -72,7 +79,9 @@ export function loadProducts(file: string, options: { requireApproved?: boolean 
   for (const product of config.products) {
     const increment = positive(product.sizeIncrementX18, `${product.symbol}.sizeIncrementX18`);
     const minSize = positive(product.minSizeX18, `${product.symbol}.minSizeX18`);
-    positive(product.risk.priceX18, `${product.symbol}.risk.priceX18`);
+    if ('priceX18' in product.risk) {
+      throw new Error(`${product.symbol} must not contain a static deploy-time priceX18`);
+    }
     if (!increment.mod(1_000_000_000).isZero() || !minSize.mod(1_000_000_000).isZero()) {
       throw new Error(`${product.symbol} sizes must preserve audited X18 to X9 storage conversion`);
     }
@@ -87,6 +96,26 @@ export function loadProducts(file: string, options: { requireApproved?: boolean 
     }
   }
   return config;
+}
+
+export function resolveProductsWithStorkPrices(
+  products: GalileoProducts,
+  pricesByProductId: ReadonlyMap<number, string>
+): GalileoDeploymentProducts {
+  const expectedIds = products.products.map((product) => product.productId);
+  const suppliedIds = [...pricesByProductId.keys()].sort((left, right) => left - right);
+  if (JSON.stringify(suppliedIds) !== JSON.stringify([...expectedIds].sort((left, right) => left - right))) {
+    throw new Error('verified Stork prices must cover exactly Galileo products 2,4,6,8');
+  }
+  const maxInt128 = BigNumber.from(2).pow(127).sub(1);
+  return {
+    ...products,
+    products: products.products.map((product) => {
+      const priceX18 = positive(pricesByProductId.get(product.productId) || '', `${product.symbol} Stork priceX18`);
+      if (priceX18.gt(maxInt128)) throw new Error(`${product.symbol} Stork priceX18 exceeds contract int128`);
+      return { ...product, risk: { ...product.risk, priceX18: priceX18.toString() } };
+    }),
+  };
 }
 
 export function loadVerifierConfig(file: string): VerifierConfig {
@@ -115,7 +144,7 @@ export function loadVerifierPoints(file: string): VerifierPoint[] {
   return loadVerifierConfig(file).keys;
 }
 
-export function initialPrices(products: ProductConfig[]): string[] {
+export function initialPrices(products: DeploymentProductConfig[]): string[] {
   const maxId = Math.max(...products.map((product) => product.productId));
   const prices = Array(maxId + 1).fill('0');
   prices[0] = utils.parseUnits('1', 18).toString();

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "reviewId": "bond-perpdex-galileo-product-vectors",
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6,
+    "provenanceFile": "config/galileo.collateral-provenance.json",
+    "provenanceSha256": "1e750f6d2af41e591fa0ff2f099fe80d033cbcd454f57b449ea406098454ba60",
+    "selectionMode": "static_pinned"
+  },
+  "contractSource": {
+    "repository": "Bond-xyz/vertex-contracts",
+    "releaseCommit": "9fa1d37e2f6dfcbc695f28d69b593e65e9457de3",
+    "productsFile": "config/galileo.products.json"
+  },
+  "rustSource": {
+    "repository": "Bond-xyz/perpdex-rust-backend",
+    "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "symbolsFile": "core/types/src/symbol.rs",
+    "baseDecimals": 8
+  },
+  "initialPricePolicy": {
+    "source": "verified_stork_deployment_snapshot",
+    "policyFile": "config/galileo.stork-deployment-policy.json",
+    "policySha256": "e4bd24787070b393bb2e3a0ea4a7c65d40129eb927d5b8afcaca60d1674372a7",
+    "staticPriceAllowed": false,
+    "snapshotTracked": false,
+    "graphPreparationRequiresSnapshot": false,
+    "snapshotRequiredBeforeFirstPriceBearingTransaction": true
+  },
+  "riskModel": {
+    "initialMarginPercent": "5",
+    "maintenanceMarginPercent": "2.5",
+    "maximumLeverage": "20",
+    "weightStorageDecimals": 9,
+    "contractWeightDecimals": 18
+  },
+  "markets": [
+    {
+      "productId": 2,
+      "symbol": "BTCUSDCPERP",
+      "contractSizeIncrement": "0.001",
+      "contractMinimumSize": "0.001",
+      "rustSizeIncrement": "0.001",
+      "rustMinimumSize": "0.001",
+      "rustMinimumPrice": "556.80",
+      "rustMaximumPrice": "4529764",
+      "rustTickSize": "0.10",
+      "sizeStatus": "match",
+      "initialPriceSource": "verified_stork_deployment_snapshot",
+      "storkFeedId": "BTCUSD"
+    },
+    {
+      "productId": 4,
+      "symbol": "ETHUSDCPERP",
+      "contractSizeIncrement": "0.001",
+      "contractMinimumSize": "0.01",
+      "rustSizeIncrement": "0.001",
+      "rustMinimumSize": "0.01",
+      "rustMinimumPrice": "39.86",
+      "rustMaximumPrice": "306177",
+      "rustTickSize": "0.01",
+      "sizeStatus": "match",
+      "initialPriceSource": "verified_stork_deployment_snapshot",
+      "storkFeedId": "ETHUSD"
+    },
+    {
+      "productId": 6,
+      "symbol": "SOLUSDCPERP",
+      "contractSizeIncrement": "0.01",
+      "contractMinimumSize": "0.1",
+      "rustSizeIncrement": "0.01",
+      "rustMinimumSize": "0.1",
+      "rustMinimumPrice": "0.01",
+      "rustMaximumPrice": "4529764",
+      "rustTickSize": "0.01",
+      "sizeStatus": "match",
+      "initialPriceSource": "verified_stork_deployment_snapshot",
+      "storkFeedId": "SOLUSD"
+    },
+    {
+      "productId": 8,
+      "symbol": "0GUSDCPERP",
+      "contractSizeIncrement": "1",
+      "contractMinimumSize": "10",
+      "rustSizeIncrement": "1",
+      "rustMinimumSize": "10",
+      "rustMinimumPrice": "0.0001",
+      "rustMaximumPrice": "306177",
+      "rustTickSize": "0.0001",
+      "sizeStatus": "match",
+      "initialPriceSource": "verified_stork_deployment_snapshot",
+      "storkFeedId": "0GUSD"
+    }
+  ],
+  "checks": {
+    "collateralUnits": "pass",
+    "collateralProvenance": "pass",
+    "riskWeightConversion": "pass",
+    "marketSizing": "pass",
+    "backendBetaBinding": "pass",
+    "staticInitialPricesAbsent": "pass",
+    "signedStorkSnapshotAtDeployment": "required"
+  },
+  "blockers": [],
+  "approval": {
+    "approved": true,
+    "approver": "Red",
+    "decision": "approve_galileo_vectors_with_verified_stork_deploy_time_prices",
+    "approvedAt": "2026-07-12T06:30:38Z",
+    "recordedScope": "Galileo testnet only; exact sizing and 20x risk retained; no fixed deploy-time prices"
+  }
+}

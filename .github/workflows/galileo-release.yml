@@ -1,0 +1,62 @@
+name: Galileo deterministic release gate
+
+on:
+  pull_request:
+    branches:
+      - bond/galileo-refork
+  push:
+    branches:
+      - bond/galileo-refork
+      - codex/perpdex-contract-monday-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full release history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install pinned dependencies
+        run: |
+          corepack enable
+          HUSKY=0 corepack yarn install --frozen-lockfile --ignore-engines
+
+      - name: compile
+        run: corepack yarn force-compile
+
+      - name: contract-interface-diff
+        run: corepack yarn diff:galileo
+
+      - name: product-vector-review
+        run: corepack yarn review:galileo:products
+
+      - name: release-tests
+        run: corepack yarn test:release
+
+      - name: gitleaks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            log_opts="$BASE_SHA..$HEAD_SHA"
+          else
+            log_opts='-1 HEAD'
+          fi
+          "$(go env GOPATH)/bin/gitleaks" git --redact --no-banner --log-opts="$log_opts" .

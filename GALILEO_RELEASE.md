@@ -29,9 +29,9 @@ The deployer rejects any substitute address or token metadata and never deploys 
 
 `DepositCollateralWithReferral` does not contain an on-chain deposit index. Its immutable event identity is `(chain ID, Endpoint address, transaction hash, log index)`; the settlement database may assign an internal `deposit_idx` only after the configured confirmation depth. Testnet-live acceptance must prove that identity maps to one slow-mode execution and one backend credit. Mock/admin credits and test-funding routes are not permitted release evidence.
 
-## Signed review and reproducible-build gate
+## Tracked Red testnet approval and reproducible-build gate
 
-Deployment requires a clean committed checkout and one EIP-712 release attestation signed outside the deployment process by a reviewer named in the tracked [`config/galileo.release-policy.json`](config/galileo.release-policy.json). Environment variables cannot change the reviewer allowlist or policy. The signed payload binds the policy version and hash, `g-bond` project and Galileo release identities, chain and exact USDC.e collateral identity, release commit and source tree, deterministic build-evidence digest, product-config digest, Verifier-config digest, signer count and signer bitmask, plus a single-use deployment intent.
+Galileo testnet has one product and release owner: Red. It does not invent a second human or a fake independent reviewer wallet. Deployment instead requires a tracked [`config/galileo.red-testnet-approval.json`](config/galileo.red-testnet-approval.json) committed after the exact reviewed candidate. The artifact binds the candidate commit and tree, deterministic build evidence, product config and product-review evidence, Verifier config, signer count and bitmask, a single-use deployment intent, successful deterministic GitHub CI, and at least one independent agent review. The final approval commit may change only that tracked approval file. Mainnet external review and multisig requirements are explicitly not waived.
 
 The ignored deployment-intent file binds a unique deployment ID and release nonce, expiry, nonzero deployer and sequencer, the deployer's exact pending transaction nonce, and the contract address that nonce must create. Create it from public values only:
 
@@ -45,11 +45,11 @@ export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.j
 corepack yarn intent:galileo
 ```
 
-The deployer must still have that exact pending nonce, the intent must be unexpired, and the expected first contract address must have no bytecode immediately before the first transaction. The sanctions deployment explicitly consumes that nonce. Once any first transaction is mined, the attestation cannot authorize another graph; partial-deployment recovery requires a new intent and external signature. Re-verifying the historical signature postflight remains valid.
+The deployer must still have that exact pending nonce, the intent must be unexpired, and the expected first contract address must have no bytecode immediately before the first transaction. The sanctions deployment explicitly consumes that nonce. Once any first transaction is mined, the approval cannot authorize another graph; partial-deployment recovery requires a new intent, a fresh deterministic evidence run, and a new tracked Red approval.
 
-`corepack yarn evidence:galileo` produces only an unsigned review request containing the EIP-712 domain, types, payload, and digest. It never creates a signature or accepted attestation. The independent reviewer checks the clean commit and evidence, signs the exact payload using their normal external signing process, and returns a local JSON object with `schemaVersion`, the unchanged `payload`, and the 65-byte `signature`. The deployer stores it at the ignored path selected by `PERPDEX_RELEASE_ATTESTATION_FILE`.
+After the product vector, policy, verifier config, deployment intent, GitHub CI, and agent-review evidence are all ready, `corepack yarn approval:galileo:red` creates a pending tracked approval artifact. It never approves itself. Red reviews the exact hashes, changes only `decision` to `approve_exact_galileo_testnet_release`, records `approvedAt`, and commits only that file. The deployment script rejects an approval file supplied from any untracked or environment-overridden location.
 
-The deployment script validates the signature against tracked policy and recomputes the clean Git commit/tree plus every bound digest immediately before its first transaction. It also rejects a zero sequencer, a reviewer who is the deployer or sequencer, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v6 deployment manifest if the signature, reviewer, intent, commit/tree, policy, build, products, Verifier evidence, or reviewed contract diff drifted. The standalone verifier repeats reviewer independence and signed-evidence checks against both the local checkout and schema-v6 manifest.
+The deployment script recomputes the approved candidate boundary and every bound digest immediately before its first transaction. It rejects a zero operator, mismatched deployer/sequencer intent, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v7 deployment manifest if the approval, intent, candidate, policy, build, product review, Verifier evidence, CI evidence, agent review, or reviewed contract diff drifted. The standalone verifier repeats the same checks against both the local checkout and schema-v7 manifest.
 
 Build evidence does not trust artifact/build-info agreement alone. It deterministically recompiles each application build input with exact solc `0.8.13`, then requires the security-relevant compiler output and every artifact's creation/runtime bytecode to match. OpenZeppelin upgrades-core deploys prebuilt `TransparentUpgradeableProxy` and `ProxyAdmin` artifacts originally compiled by exact solc `0.8.9`; the evidence collector deterministically recompiles that package's embedded build input with exact `0.8.9` and requires byte-for-byte equality. Both compiler versions, full settings, input/output hashes, source hashes, creation hashes, and runtime hashes are included in the signed build-evidence digest.
 
@@ -64,7 +64,7 @@ corepack yarn diff:galileo
 corepack yarn test:release
 ```
 
-The release suite includes negative regressions for blocked-policy, unsigned, forged, unallowlisted, stale, replayed, expired, zero-operator, and operator-conflicted reviewer attestations; duplicate Verifier keys; stale valid OpenZeppelin manifests; source/settings/compiler and paired artifact/build-info tampering; pre-transaction and pre-manifest fail-closed behavior; a one-byte artifact mutation; historical Verifier signer-count corruption; wrong signer count and bitmask; signed bitmask-`7` execution; creation-transaction and ProxyAdmin-owner provenance; and every live market/risk mismatch class.
+The release suite includes negative regressions for tracked Red approval scope and provenance drift; the retained external-signature implementation used by future mainnet policy; duplicate Verifier keys; stale valid OpenZeppelin manifests; source/settings/compiler and paired artifact/build-info tampering; pre-transaction and pre-manifest fail-closed behavior; a one-byte artifact mutation; historical Verifier signer-count corruption; wrong signer count and bitmask; signed bitmask-`7` execution; creation-transaction and ProxyAdmin-owner provenance; and every live market/risk mismatch class.
 
 Generate three independent Galileo-only verifier keys without printing them:
 
@@ -72,12 +72,15 @@ Generate three independent Galileo-only verifier keys without printing them:
 corepack yarn keys:galileo
 ```
 
-The deployment remains fail-closed until both tracked blockers are resolved in a reviewed commit:
+The deployment remains fail-closed until all tracked blockers are resolved in a reviewed candidate:
 
-1. `config/galileo.release-policy.json` names at least one independent reviewer, pins their checksum address, and changes `status` to `approved_for_galileo_testnet_release`. The reviewer address must differ from both deployer and sequencer.
-2. `config/galileo.products.json` is explicitly set to `approved: true` after Rust/contract X18 golden-vector review.
+1. Align Rust and frontend market filters with the selected contract vectors. The current review records `0GUSDCPERP` contract step/minimum `1 / 10` versus Rust `0.001 / 0.001`; it also records contract launch prices `SOL = 150` and `0G = 1` outside the Rust minimum-price filters `556.80` and `39.86`. These copied price bounds would reject real launch orders and therefore remain blocked.
+2. Red confirms the exact four-market 20x vector in `config/galileo.product-approval-review.json`; then that artifact and `config/galileo.products.json` may set their approval fields true in the reviewed candidate.
+3. The Galileo-only policy changes to `approved_for_galileo_testnet_release`; mainnet external review remains required.
+4. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent agent-review evidence for the exact candidate.
+5. Generate the pending tracked Red approval, have Red approve the exact hashes, and commit only that artifact after the candidate.
 
-Neither blocker may be bypassed with an environment variable.
+No blocker may be bypassed with an environment variable.
 
 ## Shutdown and withdrawal contract
 
@@ -91,7 +94,8 @@ Use the existing ignored backend env file without copying or printing it:
 export PERPDEX_ENV_FILE=/Users/blackbera/Desktop/Bond/perpdex-rust-backend/contracts/core/.env.galileo.local
 export PERPDEX_VERIFIER_PUBLIC_KEYS_FILE=./config/galileo.verifier-public-keys.local.json
 export PERPDEX_PRODUCTS_FILE=./config/galileo.products.json
-export PERPDEX_RELEASE_ATTESTATION_FILE=./config/galileo.release-attestation.local.json
+export PERPDEX_PRODUCT_REVIEW_FILE=./config/galileo.product-approval-review.json
+export PERPDEX_RED_APPROVAL_FILE=./config/galileo.red-testnet-approval.json
 export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.json
 export PERPDEX_DEPLOYMENT_MANIFEST=./deployments/16602/latest.local.json
 corepack yarn deploy:galileo

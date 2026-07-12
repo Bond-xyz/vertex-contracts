@@ -25,9 +25,14 @@ import {
   ReviewedSourceEvidence,
   sha256File,
 } from './release-evidence';
+import {
+  BACKEND_BETA_COMMIT,
+  collectGalileoStaticReleasePolicy,
+  GalileoStaticReleasePolicy,
+} from './stork-deployment-snapshot';
 
 export const TRACKED_GALILEO_RELEASE_POLICY = 'config/galileo.release-policy.json';
-export const RELEASE_ATTESTATION_SCHEMA_VERSION = 2;
+export const RELEASE_ATTESTATION_SCHEMA_VERSION = 3;
 export const ACTIVE_GALILEO_RELEASE_POLICY_STATUS = 'approved_for_galileo_testnet_release';
 
 export type GalileoReleaseReviewer = {
@@ -44,8 +49,11 @@ export type GalileoReleasePolicy = {
   attestationDomain: { name: string; version: string };
   chainId: number;
   collateral: { address: string; productId: number; symbol: string; decimals: number };
+  approvalMode: 'external_reviewer_signature' | 'tracked_red_testnet_approval';
   requiredReviewerSignatures: number;
   reviewers: GalileoReleaseReviewer[];
+  redApprovalArtifact: string | null;
+  mainnetExternalReviewRequired: boolean;
   status: string;
 };
 
@@ -54,6 +62,9 @@ export type GalileoDeploymentIntent = {
   projectId: string;
   releaseId: string;
   chainId: number;
+  backendBetaCommit: string;
+  storkPolicySha256: string;
+  collateralProvenanceSha256: string;
   deploymentId: string;
   deploymentNonce: string;
   expiresAt: number;
@@ -79,6 +90,9 @@ export type ReleaseAttestationPayload = {
   sourceTree: string;
   buildEvidenceSha256: string;
   productConfigSha256: string;
+  backendBetaCommit: string;
+  storkPolicySha256: string;
+  collateralProvenanceSha256: string;
   verifierConfigSha256: string;
   verifierSignerCount: number;
   verifierSignerBitmask: number;
@@ -112,6 +126,7 @@ export type VerifiedReleaseEvidence = VerifiedReleaseAttestation & {
   buildEvidenceSha256: string;
   products: GalileoProducts;
   productConfigSha256: string;
+  staticPolicy: GalileoStaticReleasePolicy;
   verifierConfig: VerifierConfig;
   verifierConfigSha256: string;
   deploymentIntent: GalileoDeploymentIntent;
@@ -134,6 +149,9 @@ export const RELEASE_ATTESTATION_TYPES = {
     { name: 'sourceTree', type: 'string' },
     { name: 'buildEvidenceSha256', type: 'bytes32' },
     { name: 'productConfigSha256', type: 'bytes32' },
+    { name: 'backendBetaCommit', type: 'string' },
+    { name: 'storkPolicySha256', type: 'bytes32' },
+    { name: 'collateralProvenanceSha256', type: 'bytes32' },
     { name: 'verifierConfigSha256', type: 'bytes32' },
     { name: 'verifierSignerCount', type: 'uint8' },
     { name: 'verifierSignerBitmask', type: 'uint8' },
@@ -200,11 +218,27 @@ type DeploymentIntentIdentity = Omit<GalileoDeploymentIntent, 'schemaVersion' | 
 export function deploymentIntentId(intent: DeploymentIntentIdentity): string {
   return utils.keccak256(
     utils.defaultAbiCoder.encode(
-      ['string', 'string', 'uint256', 'uint256', 'uint64', 'address', 'address', 'uint64', 'address'],
+      [
+        'string',
+        'string',
+        'uint256',
+        'string',
+        'bytes32',
+        'bytes32',
+        'uint256',
+        'uint64',
+        'address',
+        'address',
+        'uint64',
+        'address',
+      ],
       [
         intent.projectId,
         intent.releaseId,
         intent.chainId,
+        intent.backendBetaCommit,
+        intent.storkPolicySha256,
+        intent.collateralProvenanceSha256,
         intent.deploymentNonce,
         intent.expiresAt,
         intent.deployer,
@@ -222,6 +256,9 @@ export function createGalileoDeploymentIntent(input: {
   deployer: string;
   sequencer: string;
   firstTransactionNonce: number;
+  backendBetaCommit: string;
+  storkPolicySha256: string;
+  collateralProvenanceSha256: string;
 }): GalileoDeploymentIntent {
   const deployer = nonzeroAddress(input.deployer, 'deployment intent deployer');
   const sequencer = nonzeroAddress(input.sequencer, 'deployment intent sequencer');
@@ -234,6 +271,12 @@ export function createGalileoDeploymentIntent(input: {
     projectId: GALILEO_PROJECT_ID,
     releaseId: GALILEO_RELEASE_ID,
     chainId: GALILEO_CHAIN_ID,
+    backendBetaCommit: normalizedGitObject(input.backendBetaCommit, 'deployment intent backend beta commit'),
+    storkPolicySha256: normalizedSha256(input.storkPolicySha256, 'deployment intent Stork policy SHA-256'),
+    collateralProvenanceSha256: normalizedSha256(
+      input.collateralProvenanceSha256,
+      'deployment intent collateral provenance SHA-256'
+    ),
     deploymentNonce: normalizedUintString(input.deploymentNonce, 'deployment intent nonce'),
     expiresAt: safeUintNumber(input.expiresAt, 'deployment intent expiry'),
     deployer,
@@ -242,7 +285,7 @@ export function createGalileoDeploymentIntent(input: {
     expectedFirstContract: utils.getContractAddress({ from: deployer, nonce: firstTransactionNonce }),
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ...identity,
     deploymentId: deploymentIntentId(identity),
   };
@@ -256,6 +299,9 @@ export function validateDeploymentIntent(intent: GalileoDeploymentIntent): Galil
       'projectId',
       'releaseId',
       'chainId',
+      'backendBetaCommit',
+      'storkPolicySha256',
+      'collateralProvenanceSha256',
       'deploymentId',
       'deploymentNonce',
       'expiresAt',
@@ -267,7 +313,7 @@ export function validateDeploymentIntent(intent: GalileoDeploymentIntent): Galil
     'deployment intent'
   );
   if (
-    intent.schemaVersion !== 1 ||
+    intent.schemaVersion !== 2 ||
     intent.projectId !== GALILEO_PROJECT_ID ||
     intent.releaseId !== GALILEO_RELEASE_ID ||
     intent.chainId !== GALILEO_CHAIN_ID
@@ -280,6 +326,9 @@ export function validateDeploymentIntent(intent: GalileoDeploymentIntent): Galil
     deployer: intent.deployer,
     sequencer: intent.sequencer,
     firstTransactionNonce: intent.firstTransactionNonce,
+    backendBetaCommit: intent.backendBetaCommit,
+    storkPolicySha256: intent.storkPolicySha256,
+    collateralProvenanceSha256: intent.collateralProvenanceSha256,
   });
   if (utils.getAddress(intent.expectedFirstContract) !== normalized.expectedFirstContract) {
     throw new Error('deployment intent expected first contract does not match deployer nonce');
@@ -334,8 +383,11 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
       'attestationDomain',
       'chainId',
       'collateral',
+      'approvalMode',
       'requiredReviewerSignatures',
       'reviewers',
+      'redApprovalArtifact',
+      'mainnetExternalReviewRequired',
       'status',
     ],
     'release policy'
@@ -372,9 +424,6 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
   ) {
     throw new Error('release policy must pin exact Galileo USDC.e collateral');
   }
-  if (policy.requiredReviewerSignatures !== 1) {
-    throw new Error('release policy currently requires exactly one signed reviewer attestation');
-  }
   if (!Array.isArray(policy.reviewers)) throw new Error('release policy reviewers must be an array');
   const normalizedReviewers = policy.reviewers.map((reviewer, index) => {
     exactKeys(reviewer as unknown as Record<string, unknown>, ['name', 'address'], `release reviewer ${index}`);
@@ -383,6 +432,25 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
   });
   if (new Set(normalizedReviewers.map((reviewer) => reviewer.address)).size !== normalizedReviewers.length) {
     throw new Error('release policy reviewer addresses must be unique');
+  }
+  if (policy.mainnetExternalReviewRequired !== true) {
+    throw new Error('Galileo testnet policy must not waive mainnet external review');
+  }
+  if (policy.approvalMode === 'external_reviewer_signature') {
+    if (policy.requiredReviewerSignatures !== 1 || policy.redApprovalArtifact !== null) {
+      throw new Error('external reviewer policy requires one signature and no Red approval artifact');
+    }
+  } else if (policy.approvalMode === 'tracked_red_testnet_approval') {
+    if (
+      policy.chainId !== GALILEO_CHAIN_ID ||
+      policy.requiredReviewerSignatures !== 0 ||
+      normalizedReviewers.length !== 0 ||
+      policy.redApprovalArtifact !== 'config/galileo.red-testnet-approval.json'
+    ) {
+      throw new Error('tracked Red approval is restricted to Galileo testnet with no synthetic reviewer wallet');
+    }
+  } else {
+    throw new Error(`unsupported release approval mode: ${policy.approvalMode}`);
   }
   return { ...policy, reviewers: normalizedReviewers };
 }
@@ -415,6 +483,7 @@ export function createReleaseAttestationPayload(input: {
   source: ReviewedSourceEvidence;
   buildEvidenceSha256: string;
   productConfigSha256: string;
+  staticPolicy: GalileoStaticReleasePolicy;
   verifierConfigSha256: string;
   verifierConfig: VerifierConfig;
   deploymentIntent: GalileoDeploymentIntent;
@@ -426,6 +495,15 @@ export function createReleaseAttestationPayload(input: {
     deploymentIntent.chainId !== input.policy.chainId
   ) {
     throw new Error('deployment intent does not match tracked release policy identity');
+  }
+  if (
+    deploymentIntent.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    normalizedSha256(deploymentIntent.storkPolicySha256, 'intent Stork policy SHA-256') !==
+      normalizedSha256(input.staticPolicy.policySha256, 'static Stork policy SHA-256') ||
+    normalizedSha256(deploymentIntent.collateralProvenanceSha256, 'intent collateral provenance SHA-256') !==
+      normalizedSha256(input.staticPolicy.collateralProvenanceSha256, 'static collateral provenance SHA-256')
+  ) {
+    throw new Error('deployment intent does not bind the reviewed backend, Stork policy, and collateral provenance');
   }
   return {
     schemaVersion: RELEASE_ATTESTATION_SCHEMA_VERSION,
@@ -443,6 +521,12 @@ export function createReleaseAttestationPayload(input: {
     sourceTree: normalizedGitObject(input.source.sourceTree, 'source tree'),
     buildEvidenceSha256: normalizedSha256(input.buildEvidenceSha256, 'build evidence SHA-256'),
     productConfigSha256: normalizedSha256(input.productConfigSha256, 'product config SHA-256'),
+    backendBetaCommit: normalizedGitObject(BACKEND_BETA_COMMIT, 'backend beta commit'),
+    storkPolicySha256: normalizedSha256(input.staticPolicy.policySha256, 'Stork policy SHA-256'),
+    collateralProvenanceSha256: normalizedSha256(
+      input.staticPolicy.collateralProvenanceSha256,
+      'collateral provenance SHA-256'
+    ),
     verifierConfigSha256: normalizedSha256(input.verifierConfigSha256, 'verifier config SHA-256'),
     verifierSignerCount: input.verifierConfig.keys.length,
     verifierSignerBitmask: input.verifierConfig.signerBitmask,
@@ -465,6 +549,9 @@ export function verifySignedReleaseAttestation(
   expectedPayload: ReleaseAttestationPayload,
   attestation: SignedReleaseAttestation
 ): VerifiedReleaseAttestation {
+  if (policy.approvalMode !== 'external_reviewer_signature') {
+    throw new Error('signed external reviewer attestations are not the configured Galileo testnet approval mode');
+  }
   if (policy.status !== ACTIVE_GALILEO_RELEASE_POLICY_STATUS) {
     throw new Error(`release policy status is not active: ${policy.status}`);
   }
@@ -563,6 +650,7 @@ export async function collectUnsignedReleaseReviewRequest(input: {
   const products = loadProducts(input.productsFile, { requireApproved: false });
   const verifierConfig = loadVerifierConfig(input.verifierFile);
   const deploymentIntent = resolveDeploymentIntent(input);
+  const staticPolicy = collectGalileoStaticReleasePolicy({ repoRoot });
   const build = await collectReleaseBuildEvidence(input.artifacts);
   const buildEvidenceSha256 = releaseBuildEvidenceSha256(build);
   const productConfigSha256 = sha256File(input.productsFile);
@@ -573,6 +661,7 @@ export async function collectUnsignedReleaseReviewRequest(input: {
     source,
     buildEvidenceSha256,
     productConfigSha256,
+    staticPolicy,
     verifierConfigSha256,
     verifierConfig,
     deploymentIntent,
@@ -640,6 +729,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
   const products = loadProducts(input.productsFile);
   const verifierConfig = loadVerifierConfig(input.verifierFile);
   const deploymentIntent = resolveDeploymentIntent(input);
+  const staticPolicy = collectGalileoStaticReleasePolicy({ repoRoot });
   const build = await collectReleaseBuildEvidence(input.artifacts);
   const buildEvidenceSha256 = releaseBuildEvidenceSha256(build);
   const productConfigSha256 = sha256File(input.productsFile);
@@ -650,6 +740,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
     source,
     buildEvidenceSha256,
     productConfigSha256,
+    staticPolicy,
     verifierConfigSha256,
     verifierConfig,
     deploymentIntent,
@@ -665,6 +756,7 @@ export async function collectAndVerifyReleaseEvidence(input: {
     buildEvidenceSha256,
     products,
     productConfigSha256,
+    staticPolicy,
     verifierConfig,
     verifierConfigSha256,
     deploymentIntent,
@@ -684,6 +776,12 @@ export function assertSameVerifiedReleaseEvidence(
     ['policy SHA-256', preflight.policySha256, postflight.policySha256],
     ['build evidence SHA-256', preflight.buildEvidenceSha256, postflight.buildEvidenceSha256],
     ['product config SHA-256', preflight.productConfigSha256, postflight.productConfigSha256],
+    ['Stork policy SHA-256', preflight.staticPolicy.policySha256, postflight.staticPolicy.policySha256],
+    [
+      'collateral provenance SHA-256',
+      preflight.staticPolicy.collateralProvenanceSha256,
+      postflight.staticPolicy.collateralProvenanceSha256,
+    ],
     ['verifier config SHA-256', preflight.verifierConfigSha256, postflight.verifierConfigSha256],
     ['deployment intent ID', preflight.deploymentIntent.deploymentId, postflight.deploymentIntent.deploymentId],
   ] as const) {
