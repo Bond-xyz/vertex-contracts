@@ -12,6 +12,7 @@ import {
   executeAfterGalileoStorkPreflight,
   loadTrackedCollateralProvenance,
   loadTrackedStorkDeploymentPolicy,
+  validateStorkDeploymentPolicy,
   validateStorkDeploymentSnapshot,
   verifyStorkSignedFeed,
 } from '../scripts/stork-deployment-snapshot';
@@ -249,6 +250,24 @@ describe('Galileo signed Stork deployment packet', () => {
         '00'.repeat(32)
       )
     ).to.throw('cross-feed signed timestamp spread policy is unresolved');
+  });
+
+  it('bounds a reviewed cross-feed spread to the backend Stork max-age policy', () => {
+    const { policy } = loadTrackedStorkDeploymentPolicy();
+    const withSpread = (maxSignedTimestampSpreadSeconds: number) => ({
+      ...policy,
+      coherence: { ...policy.coherence, maxSignedTimestampSpreadSeconds },
+    });
+
+    for (const invalidSpread of [0, -1, policy.verifier.maxAgeSeconds + 1]) {
+      expect(() => validateStorkDeploymentPolicy(withSpread(invalidSpread))).to.throw(
+        'cross-feed signed timestamp spread must be null or a positive safe integer no greater than Stork max age'
+      );
+    }
+    for (const validSpread of [1, policy.verifier.maxAgeSeconds]) {
+      expect(() => validateStorkDeploymentPolicy(withSpread(validSpread))).not.to.throw();
+    }
+    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
   });
 
   it('accepts the official signed BTC proof byte-for-byte and rejects a tampered X18 price', () => {

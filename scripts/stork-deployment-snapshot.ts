@@ -256,9 +256,12 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
   if (
     policy.coherence.maxSignedTimestampSpreadSeconds !== null &&
     (!Number.isSafeInteger(policy.coherence.maxSignedTimestampSpreadSeconds) ||
-      policy.coherence.maxSignedTimestampSpreadSeconds < 0)
+      policy.coherence.maxSignedTimestampSpreadSeconds <= 0 ||
+      policy.coherence.maxSignedTimestampSpreadSeconds > verifier.maxAgeSeconds)
   ) {
-    throw new Error('cross-feed signed timestamp spread must be null or a non-negative reviewed integer');
+    throw new Error(
+      'cross-feed signed timestamp spread must be null or a positive safe integer no greater than Stork max age'
+    );
   }
   if (policy.coherence.decisionOwner !== 'Red') {
     throw new Error('cross-feed signed timestamp spread is a Red-only release decision');
