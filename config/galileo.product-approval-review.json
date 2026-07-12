@@ -103,6 +103,23 @@
     "approved": false,
     "approver": "Red",
     "decision": "pending_exact_vector_confirmation",
-    "approvedAt": null
+    "approvedAt": null,
+    "confirmedDecisions": {
+      "zeroGTestnetOrderSizing": {
+        "status": "approved",
+        "scope": "galileo_testnet_only",
+        "approver": "Red",
+        "decision": "approve_exact_0g_testnet_order_sizing",
+        "productId": 8,
+        "symbol": "0GUSDCPERP",
+        "sizeIncrement": "1",
+        "minimumSize": "10",
+        "candidateCommit": "32ce0c9a52dc04c6c32852021e45a6518c71dee5",
+        "candidateTree": "09a0cafe78d3c813ab5312f5240ca52c1ee10c37",
+        "candidateProductsSha256": "d966e543a2b0727770e1321c67ed8aad3f4d228e2e6d70503b14501141ec8619",
+        "candidateProductReviewSha256": "08e585dbe4e67fff2afcc5d95528b5538005672eb06382d5fa1c13ad876cdfea",
+        "approvedAt": "2026-07-12T00:57:35Z"
+      }
+    }
   }
 }
