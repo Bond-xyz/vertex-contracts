@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createGalileoDeploymentIntent } from './release-attestation';
+import { collectGalileoStaticReleasePolicy } from './stork-deployment-snapshot';
 
 function required(value: string | undefined, label: string): string {
   if (!value?.trim()) throw new Error(`${label} is required`);
@@ -13,19 +14,32 @@ function requiredNumber(value: string | undefined, label: string): number {
   return parsed;
 }
 
-const output = path.resolve(
-  process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
-);
-const intent = createGalileoDeploymentIntent({
-  deploymentNonce: required(process.env.PERPDEX_DEPLOYMENT_NONCE, 'PERPDEX_DEPLOYMENT_NONCE'),
-  expiresAt: requiredNumber(process.env.PERPDEX_RELEASE_EXPIRES_AT, 'PERPDEX_RELEASE_EXPIRES_AT'),
-  deployer: required(process.env.PERPDEX_DEPLOYER_ADDRESS, 'PERPDEX_DEPLOYER_ADDRESS'),
-  sequencer: required(process.env.PERPDEX_SEQUENCER_ADDRESS, 'PERPDEX_SEQUENCER_ADDRESS'),
-  firstTransactionNonce: requiredNumber(process.env.PERPDEX_FIRST_TRANSACTION_NONCE, 'PERPDEX_FIRST_TRANSACTION_NONCE'),
-});
+export function createTrackedGalileoDeploymentIntent(): void {
+  // Intent preparation binds reviewed static policy/provenance only. A live
+  // 30-second snapshot is intentionally deferred to the actual deploy preflight.
+  const staticPolicy = collectGalileoStaticReleasePolicy();
+  const output = path.resolve(
+    process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
+  );
+  const intent = createGalileoDeploymentIntent({
+    deploymentNonce: required(process.env.PERPDEX_DEPLOYMENT_NONCE, 'PERPDEX_DEPLOYMENT_NONCE'),
+    expiresAt: requiredNumber(process.env.PERPDEX_RELEASE_EXPIRES_AT, 'PERPDEX_RELEASE_EXPIRES_AT'),
+    deployer: required(process.env.PERPDEX_DEPLOYER_ADDRESS, 'PERPDEX_DEPLOYER_ADDRESS'),
+    sequencer: required(process.env.PERPDEX_SEQUENCER_ADDRESS, 'PERPDEX_SEQUENCER_ADDRESS'),
+    firstTransactionNonce: requiredNumber(
+      process.env.PERPDEX_FIRST_TRANSACTION_NONCE,
+      'PERPDEX_FIRST_TRANSACTION_NONCE'
+    ),
+    backendBetaCommit: staticPolicy.policy.backend.releaseCommit,
+    storkPolicySha256: staticPolicy.policySha256,
+    collateralProvenanceSha256: staticPolicy.collateralProvenanceSha256,
+  });
 
-fs.mkdirSync(path.dirname(output), { recursive: true });
-fs.writeFileSync(output, `${JSON.stringify(intent, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-console.log(`created single-use Galileo deployment intent at ${output}`);
-console.log(`deployment ID: ${intent.deploymentId}`);
-console.log(`expected first contract: ${intent.expectedFirstContract}`);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, `${JSON.stringify(intent, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  console.log(`created single-use Galileo deployment intent at ${output}`);
+  console.log(`deployment ID: ${intent.deploymentId}`);
+  console.log(`expected first contract: ${intent.expectedFirstContract}`);
+}
+
+if (require.main === module) createTrackedGalileoDeploymentIntent();

@@ -38,6 +38,11 @@ import {
   TRACKED_GALILEO_PRODUCTS,
   validateProductApprovalReview,
 } from './validate-galileo-product-review';
+import {
+  BACKEND_BETA_COMMIT,
+  collectGalileoStaticReleasePolicy,
+  GalileoStaticReleasePolicy,
+} from './stork-deployment-snapshot';
 
 export const TRACKED_RED_GALILEO_APPROVAL = 'config/galileo.red-testnet-approval.json';
 export const RED_TESTNET_APPROVAL_SCHEMA_VERSION = 1;
@@ -80,6 +85,9 @@ export type RedTestnetApproval = {
     buildEvidenceSha256: string;
     productConfigSha256: string;
     productReviewSha256: string;
+    backendBetaCommit: string;
+    storkPolicySha256: string;
+    collateralProvenanceSha256: string;
     verifierConfigSha256: string;
     verifierSignerCount: number;
     verifierSignerBitmask: number;
@@ -110,6 +118,7 @@ export type VerifiedRedTestnetReleaseEvidence = {
   productConfigSha256: string;
   productReview: ProductReviewResult;
   productReviewSha256: string;
+  staticPolicy: GalileoStaticReleasePolicy;
   verifierConfig: VerifierConfig;
   verifierConfigSha256: string;
   deploymentIntent: GalileoDeploymentIntent;
@@ -262,6 +271,7 @@ export async function createRedTestnetApprovalDraft(input: {
     'product review'
   );
   const { policy } = loadTrackedReleasePolicy(repoRoot);
+  const staticPolicy = collectGalileoStaticReleasePolicy({ repoRoot });
   validatePolicyForRedApproval(policy);
   if (policy.status !== ACTIVE_RED_TESTNET_POLICY_STATUS) {
     throw new Error(
@@ -273,6 +283,14 @@ export async function createRedTestnetApprovalDraft(input: {
   validateProductApprovalReview(repoRoot, { requireApproved: true });
   const verifierConfig = loadVerifierConfig(input.verifierFile);
   const deploymentIntent = loadDeploymentIntent(input.deploymentIntentFile);
+  if (
+    deploymentIntent.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    sha256(deploymentIntent.storkPolicySha256, 'intent Stork policy SHA-256') !== staticPolicy.policySha256 ||
+    sha256(deploymentIntent.collateralProvenanceSha256, 'intent collateral provenance SHA-256') !==
+      staticPolicy.collateralProvenanceSha256
+  ) {
+    throw new Error('deployment intent does not bind the reviewed backend, Stork policy, and collateral provenance');
+  }
   const build = await collectReleaseBuildEvidence(input.artifacts);
   const releaseCommit = source.releaseCommit.toLowerCase();
   validateCiEvidence(input.deterministicCi, releaseCommit);
@@ -301,6 +319,9 @@ export async function createRedTestnetApprovalDraft(input: {
       buildEvidenceSha256: releaseBuildEvidenceSha256(build),
       productConfigSha256: sha256File(productsFile),
       productReviewSha256: sha256File(productReviewFile),
+      backendBetaCommit: BACKEND_BETA_COMMIT,
+      storkPolicySha256: staticPolicy.policySha256,
+      collateralProvenanceSha256: staticPolicy.collateralProvenanceSha256,
       verifierConfigSha256: sha256File(input.verifierFile),
       verifierSignerCount: verifierConfig.keys.length,
       verifierSignerBitmask: verifierConfig.signerBitmask,
@@ -335,6 +356,7 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
     'product review'
   );
   const { policy, policyFile, policySha256 } = loadTrackedReleasePolicy(repoRoot);
+  const staticPolicy = collectGalileoStaticReleasePolicy({ repoRoot });
   validatePolicyForRedApproval(policy);
   if (policy.status !== ACTIVE_RED_TESTNET_POLICY_STATUS) {
     throw new Error(`release policy status is not active: ${policy.status}`);
@@ -367,6 +389,8 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
     ['build evidence', buildEvidenceSha256, expected.buildEvidenceSha256],
     ['product config', productConfigSha256, expected.productConfigSha256],
     ['product review', productReviewSha256, expected.productReviewSha256],
+    ['Stork policy', staticPolicy.policySha256, expected.storkPolicySha256],
+    ['collateral provenance', staticPolicy.collateralProvenanceSha256, expected.collateralProvenanceSha256],
     ['verifier config', verifierConfigSha256, expected.verifierConfigSha256],
   ] as const) {
     if (sha256(actual, `${label} SHA-256`) !== sha256(recorded, `approved ${label} SHA-256`)) {
@@ -374,6 +398,11 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
     }
   }
   if (
+    expected.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    deploymentIntent.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    sha256(deploymentIntent.storkPolicySha256, 'intent Stork policy SHA-256') !== staticPolicy.policySha256 ||
+    sha256(deploymentIntent.collateralProvenanceSha256, 'intent collateral provenance SHA-256') !==
+      staticPolicy.collateralProvenanceSha256 ||
     verifierConfig.keys.length !== expected.verifierSignerCount ||
     verifierConfig.signerBitmask !== expected.verifierSignerBitmask ||
     deploymentIntent.deploymentId.toLowerCase() !== expected.deploymentIntentId.toLowerCase() ||
@@ -401,6 +430,7 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
     productConfigSha256,
     productReview,
     productReviewSha256,
+    staticPolicy,
     verifierConfig,
     verifierConfigSha256,
     deploymentIntent,
@@ -420,6 +450,12 @@ export function assertSameVerifiedRedTestnetReleaseEvidence(
     ['build evidence SHA-256', before.buildEvidenceSha256, after.buildEvidenceSha256],
     ['product config SHA-256', before.productConfigSha256, after.productConfigSha256],
     ['product review SHA-256', before.productReviewSha256, after.productReviewSha256],
+    ['Stork policy SHA-256', before.staticPolicy.policySha256, after.staticPolicy.policySha256],
+    [
+      'collateral provenance SHA-256',
+      before.staticPolicy.collateralProvenanceSha256,
+      after.staticPolicy.collateralProvenanceSha256,
+    ],
     ['verifier config SHA-256', before.verifierConfigSha256, after.verifierConfigSha256],
     ['deployment intent ID', before.deploymentIntent.deploymentId, after.deploymentIntent.deploymentId],
   ] as const) {

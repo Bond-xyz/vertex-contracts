@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-galileo-stork-deployment-prices",
+  "status": "blocked_pending_reviewed_cross_feed_timestamp_spread",
+  "chainId": 16602,
+  "backend": {
+    "repository": "Bond-xyz/perpdex-rust-backend",
+    "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "storkBehaviorCommit": "6576efbbfaa74a0babe442be1f8aa029912893f2",
+    "verifierSourceFile": "services/price-oracle/src/stork.rs",
+    "runtimeConfigFile": "services/price-oracle/config/default.toml"
+  },
+  "verifier": {
+    "provider": "stork",
+    "restUrl": "https://rest.jp.stork-oracle.network",
+    "aggregatorPublicKey": "0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44",
+    "calculationAlgorithm": {
+      "type": "median",
+      "version": "v1",
+      "checksum": "9be7e9f9ed459417d96112a7467bd0b27575a2c7847195c68f805b70ce1795ba"
+    },
+    "maxAgeSeconds": 30,
+    "maxFutureSkewSeconds": 2
+  },
+  "coherence": {
+    "maxSignedTimestampSpreadSeconds": null,
+    "decision": "pending_explicit_reviewed_policy_input"
+  },
+  "snapshot": {
+    "schemaVersion": 1,
+    "tracked": false,
+    "defaultFile": "config/galileo.stork-deployment-snapshot.local.json",
+    "priceEncoding": "positive_signed_int256_x18",
+    "rawSignedProofRequired": true,
+    "observationBlockRequired": true
+  },
+  "feeds": [
+    {
+      "pair": "BTC/USD",
+      "symbol": "BTCUSDCPERP",
+      "productId": 2,
+      "feedId": "BTCUSD"
+    },
+    {
+      "pair": "ETH/USD",
+      "symbol": "ETHUSDCPERP",
+      "productId": 4,
+      "feedId": "ETHUSD"
+    },
+    {
+      "pair": "SOL/USD",
+      "symbol": "SOLUSDCPERP",
+      "productId": 6,
+      "feedId": "SOLUSD"
+    },
+    {
+      "pair": "0G/USD",
+      "symbol": "0GUSDCPERP",
+      "productId": 8,
+      "feedId": "0GUSD"
+    }
+  ]
+}

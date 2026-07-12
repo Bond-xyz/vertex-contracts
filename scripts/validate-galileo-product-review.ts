@@ -8,29 +8,52 @@ import {
   GALILEO_USDCE_SYMBOL,
   loadProducts,
 } from './deployment-config';
+import {
+  BACKEND_BETA_COMMIT,
+  loadTrackedCollateralProvenance,
+  loadTrackedStorkDeploymentPolicy,
+  TRACKED_COLLATERAL_PROVENANCE,
+  TRACKED_STORK_DEPLOYMENT_POLICY,
+} from './stork-deployment-snapshot';
 
 type ReviewMarket = {
   productId: number;
   symbol: string;
   contractSizeIncrement: string;
   contractMinimumSize: string;
-  contractInitialPrice: string;
   rustSizeIncrement: string;
   rustMinimumSize: string;
   rustMinimumPrice: string;
   rustMaximumPrice: string;
   rustTickSize: string;
   sizeStatus: string;
-  priceStatus: string;
+  initialPriceSource: string;
+  storkFeedId: string;
 };
 
 type ProductApprovalReview = {
   schemaVersion: number;
   reviewId: string;
   chainId: number;
-  collateral: { address: string; productId: number; symbol: string; decimals: number };
+  collateral: {
+    address: string;
+    productId: number;
+    symbol: string;
+    decimals: number;
+    provenanceFile: string;
+    provenanceSha256: string;
+    selectionMode: string;
+  };
   contractSource: { repository: string; releaseCommit: string; productsFile: string };
   rustSource: { repository: string; releaseCommit: string; symbolsFile: string; baseDecimals: number };
+  initialPricePolicy: {
+    source: string;
+    policyFile: string;
+    policySha256: string;
+    staticPriceAllowed: boolean;
+    snapshotTracked: boolean;
+    snapshotRequiredBeforeFirstTransaction: boolean;
+  };
   riskModel: {
     initialMarginPercent: string;
     maintenanceMarginPercent: string;
@@ -40,18 +63,30 @@ type ProductApprovalReview = {
   };
   markets: ReviewMarket[];
   blockers: string[];
-  approval: { approved: boolean; approver: string; decision: string; approvedAt: string | null };
+  approval: {
+    approved: boolean;
+    approver: string;
+    decision: string;
+    approvedAt: string | null;
+    recordedScope: string;
+  };
 };
 
 export type ProductReviewResult = {
+  // `ready` is deliberately only the static market-size and 20x-vector verdict.
+  // Deployment additionally requires the dynamic signed Stork preflight.
   ready: boolean;
+  staticVectorsReady: boolean;
+  scope: 'static_market_size_and_20x_only';
   blockers: string[];
+  backendBetaCommit: string;
+  storkPolicySha256: string;
+  collateralProvenanceSha256: string;
   marketVectors: Array<{
     productId: number;
     symbol: string;
     contractSizeIncrementX18: string;
     contractMinimumSizeX18: string;
-    contractInitialPriceX18: string;
     rustSizeIncrementRaw: string;
     rustMinimumSizeRaw: string;
     rustSizeIncrementX18: string;
@@ -60,7 +95,8 @@ export type ProductReviewResult = {
     rustMaximumPriceX18: string;
     rustTickSizeX18: string;
     sizeMatch: boolean;
-    priceMatch: boolean;
+    initialPriceSource: 'verified_stork_deployment_snapshot';
+    storkFeedId: string;
     match: boolean;
   }>;
 };
@@ -87,8 +123,10 @@ export function validateProductApprovalReview(
     fs.readFileSync(path.join(repoRoot, TRACKED_GALILEO_PRODUCT_REVIEW), 'utf8')
   ) as ProductApprovalReview;
   const products = loadProducts(path.join(repoRoot, TRACKED_GALILEO_PRODUCTS), { requireApproved: false });
+  const stork = loadTrackedStorkDeploymentPolicy(repoRoot);
+  const collateral = loadTrackedCollateralProvenance(repoRoot);
   if (
-    review.schemaVersion !== 1 ||
+    review.schemaVersion !== 2 ||
     review.reviewId !== 'bond-perpdex-galileo-product-vectors' ||
     review.chainId !== GALILEO_CHAIN_ID
   ) {
@@ -98,9 +136,12 @@ export function validateProductApprovalReview(
     utils.getAddress(review.collateral.address) !== GALILEO_USDCE_ADDRESS ||
     review.collateral.productId !== 0 ||
     review.collateral.symbol !== GALILEO_USDCE_SYMBOL ||
-    review.collateral.decimals !== GALILEO_USDCE_DECIMALS
+    review.collateral.decimals !== GALILEO_USDCE_DECIMALS ||
+    review.collateral.provenanceFile !== TRACKED_COLLATERAL_PROVENANCE ||
+    review.collateral.provenanceSha256 !== collateral.provenanceSha256 ||
+    review.collateral.selectionMode !== 'static_pinned'
   ) {
-    throw new Error('product approval review does not pin exact Galileo USDC.e');
+    throw new Error('product approval review does not pin exact static Galileo USDC.e provenance');
   }
   requireGitObject(review.contractSource.releaseCommit, 'contract source commit');
   requireGitObject(review.rustSource.releaseCommit, 'Rust source commit');
@@ -108,9 +149,20 @@ export function validateProductApprovalReview(
     review.contractSource.repository !== 'Bond-xyz/vertex-contracts' ||
     review.contractSource.productsFile !== TRACKED_GALILEO_PRODUCTS ||
     review.rustSource.repository !== 'Bond-xyz/perpdex-rust-backend' ||
+    review.rustSource.releaseCommit !== BACKEND_BETA_COMMIT ||
     review.rustSource.symbolsFile !== 'core/types/src/symbol.rs'
   ) {
-    throw new Error('product review does not pin the tracked contract and Rust source locations');
+    throw new Error('product review does not pin the tracked contract and accepted backend beta sources');
+  }
+  if (
+    review.initialPricePolicy.source !== 'verified_stork_deployment_snapshot' ||
+    review.initialPricePolicy.policyFile !== TRACKED_STORK_DEPLOYMENT_POLICY ||
+    review.initialPricePolicy.policySha256 !== stork.policySha256 ||
+    review.initialPricePolicy.staticPriceAllowed !== false ||
+    review.initialPricePolicy.snapshotTracked !== false ||
+    review.initialPricePolicy.snapshotRequiredBeforeFirstTransaction !== true
+  ) {
+    throw new Error('product review must require exact verified Stork prices before the first transaction');
   }
   if (review.rustSource.baseDecimals !== 8) {
     throw new Error('Rust product quantities must use the tracked 8-decimal base-unit representation');
@@ -141,11 +193,13 @@ export function validateProductApprovalReview(
     throw new Error('product review markets must be exactly the tracked Galileo products in order');
   }
   const reviewByProduct = new Map(review.markets.map((market) => [market.productId, market]));
+  const storkByProduct = new Map(stork.policy.feeds.map((feed) => [feed.productId, feed]));
   const blockers: string[] = [];
   const marketVectors = products.products.map((product) => {
     const reviewed = reviewByProduct.get(product.productId);
-    if (!reviewed || reviewed.symbol !== product.symbol) {
-      throw new Error(`missing Rust/contract review vector for product ${product.productId}`);
+    const feed = storkByProduct.get(product.productId);
+    if (!reviewed || reviewed.symbol !== product.symbol || !feed) {
+      throw new Error(`missing Rust/contract/Stork review vector for product ${product.productId}`);
     }
     for (const [field, expected] of Object.entries(expectedRisk)) {
       if (product.risk[field as keyof typeof expectedRisk] !== expected) {
@@ -162,19 +216,11 @@ export function validateProductApprovalReview(
       18,
       `${product.symbol} contract minimum size`
     );
-    const contractInitialPriceX18 = decimalToUnits(
-      reviewed.contractInitialPrice,
-      18,
-      `${product.symbol} contract initial price`
-    );
     if (contractSizeIncrementX18.toString() !== product.sizeIncrementX18) {
       throw new Error(`${product.symbol} review/config size increment drift`);
     }
     if (contractMinimumSizeX18.toString() !== product.minSizeX18) {
       throw new Error(`${product.symbol} review/config minimum size drift`);
-    }
-    if (contractInitialPriceX18.toString() !== product.risk.priceX18) {
-      throw new Error(`${product.symbol} review/config initial price drift`);
     }
     const rustSizeIncrementRaw = decimalToUnits(
       reviewed.rustSizeIncrement,
@@ -193,7 +239,7 @@ export function validateProductApprovalReview(
       rustSizeIncrementX18 === contractSizeIncrementX18 && rustMinimumSizeX18 === contractMinimumSizeX18;
     if (!sizeMatch) {
       blockers.push(
-        `${product.symbol} contract step/minimum are ${reviewed.contractSizeIncrement}/${reviewed.contractMinimumSize} while Rust step/minimum are ${reviewed.rustSizeIncrement}/${reviewed.rustMinimumSize}; align Rust and frontend metadata to the approved contract values before release approval`
+        `${product.symbol} contract step/minimum are ${reviewed.contractSizeIncrement}/${reviewed.contractMinimumSize} while accepted beta step/minimum are ${reviewed.rustSizeIncrement}/${reviewed.rustMinimumSize}`
       );
     }
     if (reviewed.sizeStatus !== (sizeMatch ? 'match' : 'blocked_mismatch')) {
@@ -203,27 +249,20 @@ export function validateProductApprovalReview(
     const rustMaximumPriceX18 = decimalToUnits(reviewed.rustMaximumPrice, 18, `${product.symbol} Rust maximum price`);
     const rustTickSizeX18 = decimalToUnits(reviewed.rustTickSize, 18, `${product.symbol} Rust price tick`);
     if (rustMinimumPriceX18 <= 0n || rustMaximumPriceX18 < rustMinimumPriceX18 || rustTickSizeX18 <= 0n) {
-      throw new Error(`${product.symbol} Rust price bounds are invalid`);
+      throw new Error(`${product.symbol} accepted-beta price bounds are invalid`);
     }
-    const priceMatch =
-      contractInitialPriceX18 >= rustMinimumPriceX18 &&
-      contractInitialPriceX18 <= rustMaximumPriceX18 &&
-      contractInitialPriceX18 % rustTickSizeX18 === 0n;
-    if (!priceMatch) {
-      blockers.push(
-        `${product.symbol} contract initial price ${reviewed.contractInitialPrice} is outside Rust price range ${reviewed.rustMinimumPrice}-${reviewed.rustMaximumPrice}; align Rust and frontend price filters with the reviewed launch market before release approval`
-      );
+    if (
+      reviewed.initialPriceSource !== 'verified_stork_deployment_snapshot' ||
+      reviewed.storkFeedId !== feed.feedId ||
+      reviewed.symbol !== feed.symbol
+    ) {
+      throw new Error(`${product.symbol} initial price must map to its exact signed Stork feed`);
     }
-    if (reviewed.priceStatus !== (priceMatch ? 'match' : 'blocked_out_of_range')) {
-      throw new Error(`${product.symbol} stored price review status does not match computed vector result`);
-    }
-    const match = sizeMatch && priceMatch;
     return {
       productId: product.productId,
       symbol: product.symbol,
       contractSizeIncrementX18: contractSizeIncrementX18.toString(),
       contractMinimumSizeX18: contractMinimumSizeX18.toString(),
-      contractInitialPriceX18: contractInitialPriceX18.toString(),
       rustSizeIncrementRaw: rustSizeIncrementRaw.toString(),
       rustMinimumSizeRaw: rustMinimumSizeRaw.toString(),
       rustSizeIncrementX18: rustSizeIncrementX18.toString(),
@@ -232,39 +271,47 @@ export function validateProductApprovalReview(
       rustMaximumPriceX18: rustMaximumPriceX18.toString(),
       rustTickSizeX18: rustTickSizeX18.toString(),
       sizeMatch,
-      priceMatch,
-      match,
+      initialPriceSource: 'verified_stork_deployment_snapshot' as const,
+      storkFeedId: feed.feedId,
+      match: sizeMatch,
     };
   });
 
   if (JSON.stringify(review.blockers) !== JSON.stringify(blockers)) {
-    throw new Error('stored Galileo product-review blockers do not match the computed cross-repository vectors');
+    throw new Error('stored Galileo product-review blockers do not match the computed static vectors');
   }
   if (review.approval.approver !== 'Red') {
     throw new Error('Galileo product-vector approval is restricted to Red');
   }
-  if (review.approval.approved) {
-    if (
-      review.approval.decision !== 'approve_exact_galileo_product_vectors' ||
-      !review.approval.approvedAt ||
-      !Number.isFinite(Date.parse(review.approval.approvedAt))
-    ) {
-      throw new Error('approved Galileo product vectors require Red decision and timestamp');
-    }
-  } else if (review.approval.decision !== 'pending_exact_vector_confirmation' || review.approval.approvedAt !== null) {
-    throw new Error('pending Galileo product vectors must remain unapproved and untimestamped');
+  if (
+    review.approval.approved !== true ||
+    review.approval.decision !== 'approve_galileo_vectors_with_verified_stork_deploy_time_prices' ||
+    !review.approval.approvedAt ||
+    !Number.isFinite(Date.parse(review.approval.approvedAt)) ||
+    !review.approval.recordedScope.includes('no fixed deploy-time prices')
+  ) {
+    throw new Error('static Galileo vectors require Red approval with the Stork deploy-time override');
   }
-  const ready = blockers.length === 0 && review.approval.approved && products.approved;
-  if (options.requireApproved && !ready) {
+  const staticVectorsReady = blockers.length === 0 && review.approval.approved && products.approved;
+  if (options.requireApproved && !staticVectorsReady) {
     throw new Error(
-      `Galileo product approval is not ready: ${[
+      `Galileo static market-vector approval is not ready: ${[
         ...blockers,
-        ...(!review.approval.approved ? ['tracked Red product approval is false'] : []),
-        ...(!products.approved ? ['galileo.products.json approved is false'] : []),
+        ...(!review.approval.approved ? ['tracked Red static-vector approval is false'] : []),
+        ...(!products.approved ? ['galileo.products.json static vector approved is false'] : []),
       ].join('; ')}`
     );
   }
-  return { ready, blockers, marketVectors };
+  return {
+    ready: staticVectorsReady,
+    staticVectorsReady,
+    scope: 'static_market_size_and_20x_only',
+    blockers,
+    backendBetaCommit: BACKEND_BETA_COMMIT,
+    storkPolicySha256: stork.policySha256,
+    collateralProvenanceSha256: collateral.provenanceSha256,
+    marketVectors,
+  };
 }
 
 if (require.main === module) {

@@ -46,16 +46,17 @@ describe('tracked Red Galileo testnet approval', () => {
     );
   });
 
-  it('records every current Rust/contract market-vector mismatch as a release blocker', () => {
+  it('accepts only the exact beta static vectors without treating them as dynamic deployment evidence', () => {
     const result = validateProductApprovalReview();
-    expect(result.ready).to.equal(false);
-    expect(result.blockers.some((blocker) => blocker.includes('0GUSDCPERP'))).to.equal(true);
+    expect(result.ready).to.equal(true);
+    expect(result.scope).to.equal('static_market_size_and_20x_only');
+    expect(result.blockers).to.deep.equal([]);
     const sol = result.marketVectors.find((market) => market.productId === 6);
     const zeroG = result.marketVectors.find((market) => market.productId === 8);
     expect(sol?.sizeMatch).to.equal(true);
-    expect(sol?.priceMatch).to.equal(false);
-    expect(zeroG?.sizeMatch).to.equal(false);
-    expect(zeroG?.priceMatch).to.equal(false);
+    expect(zeroG?.sizeMatch).to.equal(true);
+    expect(sol?.initialPriceSource).to.equal('verified_stork_deployment_snapshot');
+    expect(zeroG?.initialPriceSource).to.equal('verified_stork_deployment_snapshot');
   });
 
   it('rejects post-approval provenance drift', () => {
@@ -67,6 +68,10 @@ describe('tracked Red Galileo testnet approval', () => {
       buildEvidenceSha256: '66'.repeat(32),
       productConfigSha256: '77'.repeat(32),
       productReviewSha256: '88'.repeat(32),
+      staticPolicy: {
+        policySha256: 'aa'.repeat(32),
+        collateralProvenanceSha256: 'cc'.repeat(32),
+      },
       verifierConfigSha256: '99'.repeat(32),
       deploymentIntent: { deploymentId: `0x${'aa'.repeat(32)}` },
     } as unknown as VerifiedRedTestnetReleaseEvidence;

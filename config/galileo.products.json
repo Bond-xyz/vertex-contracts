@@ -1,9 +1,9 @@
 {
   "chainId": 16602,
-  "approved": false,
+  "approved": true,
   "approval": {
-    "owner": "PENDING_RED_CONFIRMATION",
-    "reason": "The X18 conversion and 20x risk weights must be confirmed against the Rust settlement golden vectors before deployment."
+    "owner": "Red",
+    "reason": "Approved for Galileo testnet with exact sizing and 20x risk weights. Initial/reference prices are excluded here and must come only from a fresh verified signed Stork deployment snapshot."
   },
   "spreads": "0",
   "products": [
@@ -17,8 +17,7 @@
         "longWeightInitial": 950000000,
         "shortWeightInitial": 1050000000,
         "longWeightMaintenance": 975000000,
-        "shortWeightMaintenance": 1025000000,
-        "priceX18": "100000000000000000000000"
+        "shortWeightMaintenance": 1025000000
       }
     },
     {
@@ -31,8 +30,7 @@
         "longWeightInitial": 950000000,
         "shortWeightInitial": 1050000000,
         "longWeightMaintenance": 975000000,
-        "shortWeightMaintenance": 1025000000,
-        "priceX18": "3000000000000000000000"
+        "shortWeightMaintenance": 1025000000
       }
     },
     {
@@ -45,8 +43,7 @@
         "longWeightInitial": 950000000,
         "shortWeightInitial": 1050000000,
         "longWeightMaintenance": 975000000,
-        "shortWeightMaintenance": 1025000000,
-        "priceX18": "150000000000000000000"
+        "shortWeightMaintenance": 1025000000
       }
     },
     {
@@ -59,8 +56,7 @@
         "longWeightInitial": 950000000,
         "shortWeightInitial": 1050000000,
         "longWeightMaintenance": 975000000,
-        "shortWeightMaintenance": 1025000000,
-        "priceX18": "1000000000000000000"
+        "shortWeightMaintenance": 1025000000
       }
     }
   ]

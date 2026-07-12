@@ -30,8 +30,14 @@ const HASH_A = '11'.repeat(32);
 const HASH_B = '22'.repeat(32);
 const HASH_C = '33'.repeat(32);
 const HASH_D = '44'.repeat(32);
+const HASH_F = '66'.repeat(32);
 const COMMIT = 'aa'.repeat(20);
 const TREE = 'bb'.repeat(20);
+const STATIC_INTENT_BINDING = {
+  backendBetaCommit: '1d174da2f130cf6f4f03b29029a002d92acc76f8',
+  storkPolicySha256: HASH_D,
+  collateralProvenanceSha256: HASH_F,
+};
 
 async function expectFailure(promise: Promise<unknown>, expectedMessage: string): Promise<void> {
   let error: unknown;
@@ -72,6 +78,7 @@ function fixturePayload(policy: GalileoReleasePolicy) {
   const deployer = Wallet.createRandom();
   const sequencer = Wallet.createRandom();
   const deploymentIntent = createGalileoDeploymentIntent({
+    ...STATIC_INTENT_BINDING,
     deploymentNonce: 9,
     expiresAt: 2_000_000_000,
     deployer: deployer.address,
@@ -84,6 +91,10 @@ function fixturePayload(policy: GalileoReleasePolicy) {
     source: { releaseCommit: COMMIT, sourceTree: TREE },
     buildEvidenceSha256: HASH_B,
     productConfigSha256: HASH_C,
+    staticPolicy: {
+      policySha256: HASH_D,
+      collateralProvenanceSha256: HASH_F,
+    } as never,
     verifierConfigSha256: HASH_D,
     verifierConfig: {
       chainId: 16602,
@@ -195,8 +206,13 @@ describe('signed Galileo release attestation', () => {
       policySha256: HASH_A,
       buildEvidenceSha256: HASH_B,
       productConfigSha256: HASH_C,
+      staticPolicy: {
+        policySha256: HASH_D,
+        collateralProvenanceSha256: HASH_F,
+      },
       verifierConfigSha256: HASH_D,
       deploymentIntent: createGalileoDeploymentIntent({
+        ...STATIC_INTENT_BINDING,
         deploymentNonce: 9,
         expiresAt: 2_000_000_000,
         deployer: Wallet.createRandom().address,
@@ -229,6 +245,7 @@ describe('signed Galileo release attestation', () => {
     const reviewer = Wallet.createRandom();
     const { policy, payload, attestation } = await signedFixture(reviewer);
     const deploymentIntent = createGalileoDeploymentIntent({
+      ...STATIC_INTENT_BINDING,
       deploymentNonce: payload.deploymentNonce,
       expiresAt: payload.expiresAt,
       deployer: payload.deployer,
@@ -281,6 +298,7 @@ describe('signed Galileo release attestation', () => {
   it('rejects zero-address operators and rechecks reviewer independence during standalone verification', () => {
     expect(() =>
       createGalileoDeploymentIntent({
+        ...STATIC_INTENT_BINDING,
         deploymentNonce: 1,
         expiresAt: 2_000_000_000,
         deployer: Wallet.createRandom().address,
@@ -291,6 +309,7 @@ describe('signed Galileo release attestation', () => {
 
     const reviewer = Wallet.createRandom();
     const intent = createGalileoDeploymentIntent({
+      ...STATIC_INTENT_BINDING,
       deploymentNonce: 1,
       expiresAt: 2_000_000_000,
       deployer: reviewer.address,
