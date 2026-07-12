@@ -9,7 +9,7 @@ import {
   loadProducts,
 } from './deployment-config';
 import {
-  BACKEND_BETA_COMMIT,
+  BACKEND_PROTOCOL_BASELINE_COMMIT,
   loadTrackedCollateralProvenance,
   loadTrackedStorkDeploymentPolicy,
   TRACKED_COLLATERAL_PROVENANCE,
@@ -44,8 +44,19 @@ type ProductApprovalReview = {
     provenanceSha256: string;
     selectionMode: string;
   };
-  contractSource: { repository: string; releaseCommit: string; productsFile: string };
-  rustSource: { repository: string; releaseCommit: string; symbolsFile: string; baseDecimals: number };
+  contractSource: {
+    repository: string;
+    releaseCommit: string;
+    releaseTree: string;
+    productsFile: string;
+  };
+  rustSource: {
+    repository: string;
+    releaseCommit: string;
+    releaseCommitRole: string;
+    symbolsFile: string;
+    baseDecimals: number;
+  };
   initialPricePolicy: {
     source: string;
     policyFile: string;
@@ -80,7 +91,7 @@ export type ProductReviewResult = {
   staticVectorsReady: boolean;
   scope: 'static_market_size_and_20x_only';
   blockers: string[];
-  backendBetaCommit: string;
+  backendProtocolBaselineCommit: string;
   storkPolicySha256: string;
   collateralProvenanceSha256: string;
   marketVectors: Array<{
@@ -104,6 +115,8 @@ export type ProductReviewResult = {
 
 export const TRACKED_GALILEO_PRODUCT_REVIEW = 'config/galileo.product-approval-review.json';
 export const TRACKED_GALILEO_PRODUCTS = 'config/galileo.products.json';
+export const GALILEO_CONTRACT_PACKET_BASE_COMMIT = '8ac5c9f3dfd4c5afc33e940400ead69c719fe043';
+export const GALILEO_CONTRACT_PACKET_BASE_TREE = 'fa7c4782c141c55ab8ecfa51a297bec1c6a4c43f';
 
 function decimalToUnits(value: string, decimals: number, label: string): bigint {
   if (!/^\d+(\.\d+)?$/.test(value)) throw new Error(`${label} must be an unsigned decimal`);
@@ -127,7 +140,7 @@ export function validateProductApprovalReview(
   const stork = loadTrackedStorkDeploymentPolicy(repoRoot);
   const collateral = loadTrackedCollateralProvenance(repoRoot);
   if (
-    review.schemaVersion !== 2 ||
+    review.schemaVersion !== 3 ||
     review.reviewId !== 'bond-perpdex-galileo-product-vectors' ||
     review.chainId !== GALILEO_CHAIN_ID
   ) {
@@ -145,15 +158,19 @@ export function validateProductApprovalReview(
     throw new Error('product approval review does not pin exact static Galileo USDC.e provenance');
   }
   requireGitObject(review.contractSource.releaseCommit, 'contract source commit');
+  requireGitObject(review.contractSource.releaseTree, 'contract source tree');
   requireGitObject(review.rustSource.releaseCommit, 'Rust source commit');
   if (
     review.contractSource.repository !== 'Bond-xyz/vertex-contracts' ||
+    review.contractSource.releaseCommit !== GALILEO_CONTRACT_PACKET_BASE_COMMIT ||
+    review.contractSource.releaseTree !== GALILEO_CONTRACT_PACKET_BASE_TREE ||
     review.contractSource.productsFile !== TRACKED_GALILEO_PRODUCTS ||
     review.rustSource.repository !== 'Bond-xyz/perpdex-rust-backend' ||
-    review.rustSource.releaseCommit !== BACKEND_BETA_COMMIT ||
+    review.rustSource.releaseCommit !== BACKEND_PROTOCOL_BASELINE_COMMIT ||
+    review.rustSource.releaseCommitRole !== 'reviewed_protocol_baseline_only' ||
     review.rustSource.symbolsFile !== 'core/types/src/symbol.rs'
   ) {
-    throw new Error('product review does not pin the tracked contract and accepted backend beta sources');
+    throw new Error('product review does not pin the tracked contract and reviewed backend protocol baseline');
   }
   if (
     review.initialPricePolicy.source !== 'verified_stork_deployment_snapshot' ||
@@ -243,7 +260,7 @@ export function validateProductApprovalReview(
       rustSizeIncrementX18 === contractSizeIncrementX18 && rustMinimumSizeX18 === contractMinimumSizeX18;
     if (!sizeMatch) {
       blockers.push(
-        `${product.symbol} contract step/minimum are ${reviewed.contractSizeIncrement}/${reviewed.contractMinimumSize} while accepted beta step/minimum are ${reviewed.rustSizeIncrement}/${reviewed.rustMinimumSize}`
+        `${product.symbol} contract step/minimum are ${reviewed.contractSizeIncrement}/${reviewed.contractMinimumSize} while the reviewed protocol baseline step/minimum are ${reviewed.rustSizeIncrement}/${reviewed.rustMinimumSize}`
       );
     }
     if (reviewed.sizeStatus !== (sizeMatch ? 'match' : 'blocked_mismatch')) {
@@ -311,7 +328,7 @@ export function validateProductApprovalReview(
     staticVectorsReady,
     scope: 'static_market_size_and_20x_only',
     blockers,
-    backendBetaCommit: BACKEND_BETA_COMMIT,
+    backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
     storkPolicySha256: stork.policySha256,
     collateralProvenanceSha256: collateral.provenanceSha256,
     marketVectors,

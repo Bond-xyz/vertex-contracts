@@ -49,7 +49,7 @@ The deployer must still have that exact pending nonce, the intent must be unexpi
 
 After the product vector, policy, verifier config, deployment intent, GitHub CI, and agent-review evidence are all ready, `corepack yarn approval:galileo:red` creates a pending tracked approval artifact. It never approves itself. Red reviews the exact hashes, changes only `decision` to `approve_exact_galileo_testnet_release`, records `approvedAt`, and commits only that file. The deployment script rejects an approval file supplied from any untracked or environment-overridden location.
 
-The deployment script recomputes the approved candidate boundary and every bound digest immediately before its first transaction. It rejects a zero operator, mismatched deployer/sequencer intent, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v7 deployment manifest if the approval, intent, candidate, policy, build, product review, Verifier evidence, CI evidence, agent review, or reviewed contract diff drifted. The standalone verifier repeats the same checks against both the local checkout and schema-v7 manifest.
+The deployment script recomputes the approved candidate boundary and every bound digest immediately before its first transaction. It rejects a zero operator, mismatched deployer/sequencer intent, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v9 deployment manifest if the approval, intent, candidate, policy, build, product review, Verifier evidence, CI evidence, agent review, or reviewed contract diff drifted. The standalone verifier repeats the same checks against both the local checkout and schema-v9 manifest.
 
 Build evidence does not trust artifact/build-info agreement alone. It deterministically recompiles each application build input with exact solc `0.8.13`, then requires the security-relevant compiler output and every artifact's creation/runtime bytecode to match. OpenZeppelin upgrades-core deploys prebuilt `TransparentUpgradeableProxy` and `ProxyAdmin` artifacts originally compiled by exact solc `0.8.9`; the evidence collector deterministically recompiles that package's embedded build input with exact `0.8.9` and requires byte-for-byte equality. Both compiler versions, full settings, input/output hashes, source hashes, creation hashes, and runtime hashes are included in the signed build-evidence digest.
 
@@ -72,13 +72,33 @@ Generate three independent Galileo-only verifier keys without printing them:
 corepack yarn keys:galileo
 ```
 
+## Four-market Stork price packet
+
+The approved static launch vector contains only sizing and 20x risk weights. It contains no BTC, ETH, SOL, or 0G reference price. Finalization requires one untracked packet containing the exact signed `BTCUSD`, `ETHUSD`, `SOLUSD`, and `0GUSD` Stork proofs plus a canonical Galileo observation block. The packet creator verifies feed identity, price/proof parity, the pinned aggregator signature, median-v1 checksum, signed freshness and future skew, the observation block timestamp, and the reviewed cross-feed signed-timestamp spread before it writes the packet. Finalization verifies the packet again before every price-bearing broadcast and against every receipt block.
+
+The cross-feed maximum signed-timestamp spread is deliberately `null` in [`config/galileo.stork-deployment-policy.json`](config/galileo.stork-deployment-policy.json). Red is the decision owner. Until Red supplies the exact reviewed integer and the policy change passes review, packet creation, deployment intent creation, graph preparation, and finalization all fail closed. No proposed value, including three seconds, is an approved substitute.
+
+After that decision is committed and reviewed, create the untracked verified packet from a no-secret Stork response and matching public block evidence:
+
+```bash
+export PERPDEX_STORK_RAW_RESPONSE_FILE=./config/galileo.stork-raw-response.local.json
+export PERPDEX_STORK_OBSERVATION_BLOCK_FILE=./config/galileo.stork-observation-block.local.json
+export PERPDEX_STORK_SNAPSHOT_FILE=./config/galileo.stork-deployment-snapshot.local.json
+corepack yarn snapshot:galileo:stork
+```
+
+The packet records each feed identity, exact X18 value, signed timestamp, signature proof, observation block, final runtime source/artifact binding, policy hash, and deterministic packet hash in the final manifest. It is never a tracked source file and never contains Stork credentials.
+
+The backend commit `1d174da2f130cf6f4f03b29029a002d92acc76f8` is only the reviewed protocol baseline used for the withdrawal, sizing, and Stork compatibility checks in this packet. It is not the deployable backend. The final runtime source commit and immutable artifact-manifest SHA-256 are deliberately `null` in the tracked Stork policy. Release preparation remains blocked until the final reviewed Linux artifact supplies both values together; the policy hash then binds them into the deployment intent, Red approval, attestation, Stork packet, and final manifest.
+
 The deployment remains fail-closed until all tracked blockers are resolved in a reviewed candidate:
 
-1. Align Rust and frontend market filters with the selected contract vectors. The current review records `0GUSDCPERP` contract step/minimum `1 / 10` versus Rust `0.001 / 0.001`; it also records contract launch prices `SOL = 150` and `0G = 1` outside the Rust minimum-price filters `556.80` and `39.86`. These copied price bounds would reject real launch orders and therefore remain blocked.
-2. Red confirms the exact four-market 20x vector in `config/galileo.product-approval-review.json`; then that artifact and `config/galileo.products.json` may set their approval fields true in the reviewed candidate.
-3. The Galileo-only policy changes to `approved_for_galileo_testnet_release`; mainnet external review remains required.
-4. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent agent-review evidence for the exact candidate.
+1. Red supplies the exact cross-feed maximum signed-timestamp spread. It is currently unset and blocks every release phase.
+2. Bind the exact final backend source commit and immutable Linux artifact-manifest SHA-256. The reviewed `1d174da2` protocol baseline cannot fill either field.
+3. The reviewed Stork policy and Galileo-only release policy change to their approved testnet states; mainnet external review remains required.
+4. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent-agent review evidence for the exact candidate.
 5. Generate the pending tracked Red approval, have Red approve the exact hashes, and commit only that artifact after the candidate.
+6. Capture and verify one fresh four-feed Stork packet immediately before finalization. Any missing, stale, future-skewed, incoherent, tampered, or reorged evidence stops before the next transaction.
 
 No blocker may be bypassed with an environment variable.
 
@@ -97,9 +117,17 @@ export PERPDEX_PRODUCTS_FILE=./config/galileo.products.json
 export PERPDEX_PRODUCT_REVIEW_FILE=./config/galileo.product-approval-review.json
 export PERPDEX_RED_APPROVAL_FILE=./config/galileo.red-testnet-approval.json
 export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.json
+export PERPDEX_STORK_SNAPSHOT_FILE=./config/galileo.stork-deployment-snapshot.local.json
+export PERPDEX_PREPARED_DEPLOYMENT=./deployments/16602/prepared.local.json
+export PERPDEX_FINALIZATION_JOURNAL=./deployments/16602/finalization.local.json
 export PERPDEX_DEPLOYMENT_MANIFEST=./deployments/16602/latest.local.json
+export PERPDEX_DEPLOY_PHASE=prepare
+corepack yarn deploy:galileo
+export PERPDEX_DEPLOY_PHASE=finalize
 corepack yarn deploy:galileo
 corepack yarn verify:galileo
 ```
+
+The prepare phase deploys only the uninitialized, non-price-bearing graph. The finalize phase is the first path allowed to initialize prices or add markets, and it cannot start without the fresh verified Stork packet.
 
 Required post-deploy integrations are deliberately outside this contract cartridge: Rust batch Schnorr signing, wallet order/withdrawal signature persistence, X9/X8-to-X18 conversion, audited-array `PerpTick` encoding, and removal of type 33.

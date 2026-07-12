@@ -6,6 +6,12 @@
   "backend": {
     "repository": "Bond-xyz/perpdex-rust-backend",
     "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "releaseCommitRole": "reviewed_protocol_baseline_only",
+    "runtimeRelease": {
+      "sourceCommit": null,
+      "artifactManifestSha256": null,
+      "status": "pending_final_immutable_backend_release"
+    },
     "storkBehaviorCommit": "6576efbbfaa74a0babe442be1f8aa029912893f2",
     "verifierSourceFile": "services/price-oracle/src/stork.rs",
     "runtimeConfigFile": "services/price-oracle/config/default.toml"
@@ -24,7 +30,8 @@
   },
   "coherence": {
     "maxSignedTimestampSpreadSeconds": null,
-    "decision": "pending_explicit_reviewed_policy_input"
+    "decisionOwner": "Red",
+    "decision": "pending_explicit_red_policy_input"
   },
   "snapshot": {
     "schemaVersion": 1,

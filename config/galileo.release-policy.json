@@ -20,5 +20,5 @@
   "reviewers": [],
   "redApprovalArtifact": "config/galileo.red-testnet-approval.json",
   "mainnetExternalReviewRequired": true,
-  "status": "blocked_pending_red_tracked_approval_and_product_approval"
+  "status": "blocked_pending_red_cross_feed_spread_final_backend_and_release_evidence"
 }

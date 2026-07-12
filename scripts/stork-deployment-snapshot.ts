@@ -9,7 +9,10 @@ import {
   GALILEO_USDCE_SYMBOL,
 } from './deployment-config';
 
-export const BACKEND_BETA_COMMIT = '1d174da2f130cf6f4f03b29029a002d92acc76f8';
+export const BACKEND_PROTOCOL_BASELINE_COMMIT = '1d174da2f130cf6f4f03b29029a002d92acc76f8';
+// Retained only for the existing release-attestation field name. This value is
+// a reviewed protocol baseline, never the final runtime artifact source.
+export const BACKEND_BETA_COMMIT = BACKEND_PROTOCOL_BASELINE_COMMIT;
 export const TRACKED_STORK_DEPLOYMENT_POLICY = 'config/galileo.stork-deployment-policy.json';
 export const TRACKED_COLLATERAL_PROVENANCE = 'config/galileo.collateral-provenance.json';
 export const DEFAULT_STORK_DEPLOYMENT_SNAPSHOT = 'config/galileo.stork-deployment-snapshot.local.json';
@@ -29,6 +32,12 @@ export type StorkDeploymentPolicy = {
   backend: {
     repository: string;
     releaseCommit: string;
+    releaseCommitRole: string;
+    runtimeRelease: {
+      sourceCommit: string | null;
+      artifactManifestSha256: string | null;
+      status: string;
+    };
     storkBehaviorCommit: string;
     verifierSourceFile: string;
     runtimeConfigFile: string;
@@ -41,7 +50,11 @@ export type StorkDeploymentPolicy = {
     maxAgeSeconds: number;
     maxFutureSkewSeconds: number;
   };
-  coherence: { maxSignedTimestampSpreadSeconds: number | null; decision: string };
+  coherence: {
+    maxSignedTimestampSpreadSeconds: number | null;
+    decisionOwner: string;
+    decision: string;
+  };
   snapshot: {
     schemaVersion: number;
     tracked: boolean;
@@ -72,7 +85,7 @@ export type StorkSignedFeed = StorkFeedPolicy & {
 export type StorkDeploymentSnapshot = {
   schemaVersion: number;
   chainId: number;
-  backendBetaCommit: string;
+  backendProtocolBaselineCommit: string;
   policySha256: string;
   capturedAtNs: string;
   observationBlock: { number: number; hash: string; timestamp: number };
@@ -180,14 +193,33 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
     policy.chainId !== GALILEO_CHAIN_ID ||
     policy.backend.repository !== 'Bond-xyz/perpdex-rust-backend' ||
     policy.backend.releaseCommit !== BACKEND_BETA_COMMIT ||
+    policy.backend.releaseCommitRole !== 'reviewed_protocol_baseline_only' ||
     policy.backend.storkBehaviorCommit !== '6576efbbfaa74a0babe442be1f8aa029912893f2' ||
     policy.backend.verifierSourceFile !== 'services/price-oracle/src/stork.rs' ||
     policy.backend.runtimeConfigFile !== 'services/price-oracle/config/default.toml'
   ) {
-    throw new Error('Stork deployment policy is not bound to the accepted backend beta');
+    throw new Error('Stork deployment policy is not bound to the reviewed backend protocol baseline');
   }
-  requireGitObject(policy.backend.releaseCommit, 'backend beta commit');
+  requireGitObject(policy.backend.releaseCommit, 'backend protocol baseline commit');
   requireGitObject(policy.backend.storkBehaviorCommit, 'Stork behavior commit');
+  const runtimeRelease = policy.backend.runtimeRelease;
+  const runtimeReleaseUnset = runtimeRelease.sourceCommit === null && runtimeRelease.artifactManifestSha256 === null;
+  if (
+    runtimeReleaseUnset
+      ? runtimeRelease.status !== 'pending_final_immutable_backend_release'
+      : runtimeRelease.status !== 'reviewed_immutable_backend_release' ||
+        runtimeRelease.sourceCommit === null ||
+        runtimeRelease.artifactManifestSha256 === null
+  ) {
+    throw new Error('runtime backend source and immutable artifact manifest must resolve together under review');
+  }
+  if (!runtimeReleaseUnset) {
+    requireGitObject(runtimeRelease.sourceCommit!, 'runtime backend source commit');
+    requireSha256(runtimeRelease.artifactManifestSha256!, 'runtime backend artifact manifest SHA-256');
+    if (runtimeRelease.sourceCommit!.toLowerCase() === BACKEND_PROTOCOL_BASELINE_COMMIT) {
+      throw new Error('reviewed protocol baseline cannot be reused as the final runtime backend source');
+    }
+  }
   const verifier = policy.verifier;
   if (
     verifier.provider !== 'stork' ||
@@ -199,7 +231,7 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
     verifier.maxAgeSeconds !== 30 ||
     verifier.maxFutureSkewSeconds !== 2
   ) {
-    throw new Error('Stork deployment policy verifier does not match accepted beta constraints');
+    throw new Error('Stork deployment policy verifier does not match the reviewed protocol baseline constraints');
   }
   if (
     policy.snapshot.schemaVersion !== 1 ||
@@ -227,6 +259,16 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
       policy.coherence.maxSignedTimestampSpreadSeconds < 0)
   ) {
     throw new Error('cross-feed signed timestamp spread must be null or a non-negative reviewed integer');
+  }
+  if (policy.coherence.decisionOwner !== 'Red') {
+    throw new Error('cross-feed signed timestamp spread is a Red-only release decision');
+  }
+  if (
+    policy.coherence.maxSignedTimestampSpreadSeconds === null &&
+    (policy.status !== 'blocked_pending_reviewed_cross_feed_timestamp_spread' ||
+      policy.coherence.decision !== 'pending_explicit_red_policy_input')
+  ) {
+    throw new Error('unset cross-feed signed timestamp spread must remain explicitly fail-closed pending Red');
   }
   return policy;
 }
@@ -328,7 +370,7 @@ export function verifyStorkSignedFeed(
   const signedTimestamp = requireDecimalInteger(feed.proof.signedTimestampNs, `${expected.feedId} signed timestamp`);
   const publicKey = utils.getAddress(feed.proof.publicKey);
   if (publicKey !== utils.getAddress(verifier.aggregatorPublicKey)) {
-    throw new Error(`${expected.feedId} Stork aggregator does not match accepted beta`);
+    throw new Error(`${expected.feedId} Stork aggregator does not match the reviewed protocol baseline`);
   }
   const encodedAssetId = requireBytes32(feed.proof.encodedAssetId, `${expected.feedId} encoded asset ID`);
   if (encodedAssetId !== utils.keccak256(utils.toUtf8Bytes(expected.feedId)).toLowerCase()) {
@@ -388,7 +430,7 @@ export function validateStorkDeploymentSnapshot(
   if (
     snapshot.schemaVersion !== policy.snapshot.schemaVersion ||
     snapshot.chainId !== GALILEO_CHAIN_ID ||
-    snapshot.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    snapshot.backendProtocolBaselineCommit !== BACKEND_PROTOCOL_BASELINE_COMMIT ||
     requireSha256(snapshot.policySha256, 'snapshot policy SHA-256') !== requireSha256(policySha256, 'policy SHA-256')
   ) {
     throw new Error('Stork deployment snapshot identity or accepted-beta binding mismatch');
@@ -507,6 +549,14 @@ export function collectGalileoStaticReleasePolicy(input: { repoRoot?: string } =
   const tracked = loadTrackedStorkDeploymentPolicy(repoRoot);
   if (tracked.policy.coherence.maxSignedTimestampSpreadSeconds === null) {
     throw new Error('cross-feed signed timestamp spread policy is unresolved; release preparation remains blocked');
+  }
+  if (
+    tracked.policy.backend.runtimeRelease.sourceCommit === null ||
+    tracked.policy.backend.runtimeRelease.artifactManifestSha256 === null
+  ) {
+    throw new Error(
+      'final immutable backend artifact/source binding is unresolved; release preparation remains blocked'
+    );
   }
   const collateral = loadTrackedCollateralProvenance(repoRoot);
   return {
@@ -637,7 +687,7 @@ export function createStorkDeploymentSnapshotFromRaw(input: {
   return {
     schemaVersion: 1,
     chainId: GALILEO_CHAIN_ID,
-    backendBetaCommit: BACKEND_BETA_COMMIT,
+    backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
     policySha256: requireSha256(input.policySha256, 'policy SHA-256'),
     capturedAtNs: requireDecimalInteger(input.capturedAtNs, 'capture timestamp').toString(),
     observationBlock: input.observationBlock,

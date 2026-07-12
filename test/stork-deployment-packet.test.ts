@@ -4,7 +4,7 @@ import path from 'path';
 import { expect } from 'chai';
 import { GALILEO_USDCE_ADDRESS, loadProducts, resolveProductsWithStorkPrices } from '../scripts/deployment-config';
 import {
-  BACKEND_BETA_COMMIT,
+  BACKEND_PROTOCOL_BASELINE_COMMIT,
   assertStorkDeploymentSnapshotFresh,
   assertStorkSnapshotObservationTime,
   collectGalileoStaticReleasePolicy,
@@ -16,7 +16,11 @@ import {
   verifyStorkSignedFeed,
 } from '../scripts/stork-deployment-snapshot';
 import { createTrackedGalileoDeploymentIntent } from '../scripts/create-galileo-deployment-intent';
-import { validateProductApprovalReview } from '../scripts/validate-galileo-product-review';
+import {
+  GALILEO_CONTRACT_PACKET_BASE_COMMIT,
+  GALILEO_CONTRACT_PACKET_BASE_TREE,
+  validateProductApprovalReview,
+} from '../scripts/validate-galileo-product-review';
 
 const OFFICIAL_BTC_PROOF = {
   pair: 'BTC/USD',
@@ -65,7 +69,11 @@ describe('Galileo signed Stork deployment packet', () => {
     const policy = JSON.parse(
       fs.readFileSync(path.resolve(__dirname, '..', 'config', 'galileo.stork-deployment-policy.json'), 'utf8')
     );
-    policy.coherence = { maxSignedTimestampSpreadSeconds: 3, decision: 'fixture_reviewed_value' };
+    policy.coherence = {
+      maxSignedTimestampSpreadSeconds: 3,
+      decisionOwner: 'Red',
+      decision: 'fixture_reviewed_value',
+    };
     fs.writeFileSync(
       path.join(temporaryRoot, 'config', 'galileo.stork-deployment-policy.json'),
       JSON.stringify(policy)
@@ -75,6 +83,18 @@ describe('Galileo signed Stork deployment packet', () => {
       path.join(temporaryRoot, 'config', 'galileo.collateral-provenance.json')
     );
     try {
+      expect(() => collectGalileoStaticReleasePolicy({ repoRoot: temporaryRoot })).to.throw(
+        'final immutable backend artifact/source binding is unresolved'
+      );
+      policy.backend.runtimeRelease = {
+        sourceCommit: '44c6595a3f8d5d1b1791b5d18d08442057223072',
+        artifactManifestSha256: 'ab'.repeat(32),
+        status: 'reviewed_immutable_backend_release',
+      };
+      fs.writeFileSync(
+        path.join(temporaryRoot, 'config', 'galileo.stork-deployment-policy.json'),
+        JSON.stringify(policy)
+      );
       const staticPolicy = collectGalileoStaticReleasePolicy({ repoRoot: temporaryRoot });
       expect(staticPolicy.policySha256).to.match(/^[0-9a-f]{64}$/);
       expect(
@@ -148,23 +168,78 @@ describe('Galileo signed Stork deployment packet', () => {
     expect(deploySource).to.contain('expectedSequencer: prepared.sequencer');
     expect(deploySource).not.to.contain('const endpointInitializeTx');
     expect(deploySource).not.to.contain('verifiedSignedStorkSnapshotBeforeFirstProviderReadAndTransaction');
+    const packetCreatorSource = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'create-galileo-stork-snapshot.ts'),
+      'utf8'
+    );
+    expect(
+      packetCreatorSource.indexOf('validateStorkDeploymentSnapshot(snapshot, policy, policySha256)')
+    ).to.be.lessThan(packetCreatorSource.indexOf('fs.writeFileSync(outputFile'));
   });
 
-  it('pins the accepted beta verifier and remains non-deployable without a reviewed cross-feed spread', () => {
+  it('pins the reviewed protocol baseline while leaving the runtime artifact and cross-feed spread unresolved', () => {
     const { policy } = loadTrackedStorkDeploymentPolicy();
     expect(policy.backend.repository).to.equal('Bond-xyz/perpdex-rust-backend');
-    expect(policy.backend.releaseCommit).to.equal(BACKEND_BETA_COMMIT);
-    expect(policy.verifier.maxAgeSeconds).to.equal(30);
-    expect(policy.verifier.maxFutureSkewSeconds).to.equal(2);
-    expect(policy.verifier.aggregatorPublicKey).to.equal('0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44');
-    expect(policy.feeds.map((feed) => feed.feedId)).to.deep.equal(['BTCUSD', 'ETHUSD', 'SOLUSD', '0GUSD']);
-    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
+    expect(policy.backend.releaseCommit).to.equal(BACKEND_PROTOCOL_BASELINE_COMMIT);
+    expect(policy.backend.releaseCommitRole).to.equal('reviewed_protocol_baseline_only');
+    expect(policy.backend.runtimeRelease).to.deep.equal({
+      sourceCommit: null,
+      artifactManifestSha256: null,
+      status: 'pending_final_immutable_backend_release',
+    });
     expect(() =>
       validateStorkDeploymentSnapshot(
         {
           schemaVersion: 1,
           chainId: 16602,
-          backendBetaCommit: BACKEND_BETA_COMMIT,
+          backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
+          policySha256: '00'.repeat(32),
+          capturedAtNs: '1722632569208762117',
+          observationBlock: { number: 1, hash: `0x${'11'.repeat(32)}`, timestamp: 1722632569 },
+          feeds: [],
+        },
+        {
+          ...policy,
+          backend: {
+            ...policy.backend,
+            runtimeRelease: {
+              sourceCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
+              artifactManifestSha256: 'ab'.repeat(32),
+              status: 'reviewed_immutable_backend_release',
+            },
+          },
+        },
+        '00'.repeat(32)
+      )
+    ).to.throw('protocol baseline cannot be reused');
+    expect(policy.verifier.maxAgeSeconds).to.equal(30);
+    expect(policy.verifier.maxFutureSkewSeconds).to.equal(2);
+    expect(policy.verifier.aggregatorPublicKey).to.equal('0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44');
+    expect(policy.feeds.map((feed) => feed.feedId)).to.deep.equal(['BTCUSD', 'ETHUSD', 'SOLUSD', '0GUSD']);
+    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
+    expect(policy.coherence.decisionOwner).to.equal('Red');
+    expect(policy.coherence.decision).to.equal('pending_explicit_red_policy_input');
+    expect(() =>
+      validateStorkDeploymentSnapshot(
+        {
+          schemaVersion: 1,
+          chainId: 16602,
+          backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
+          policySha256: '00'.repeat(32),
+          capturedAtNs: '1722632569208762117',
+          observationBlock: { number: 1, hash: `0x${'11'.repeat(32)}`, timestamp: 1722632569 },
+          feeds: [],
+        },
+        { ...policy, coherence: { ...policy.coherence, decisionOwner: 'not-red' } },
+        '00'.repeat(32)
+      )
+    ).to.throw('Red-only release decision');
+    expect(() =>
+      validateStorkDeploymentSnapshot(
+        {
+          schemaVersion: 1,
+          chainId: 16602,
+          backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
           policySha256: '00'.repeat(32),
           capturedAtNs: '1722632569208762117',
           observationBlock: { number: 1, hash: `0x${'11'.repeat(32)}`, timestamp: 1722632569 },
@@ -236,10 +311,12 @@ describe('Galileo signed Stork deployment packet', () => {
     );
   });
 
-  it('keeps the approved beta market sizing and 20x vectors while making price approval snapshot-based', () => {
+  it('keeps the reviewed protocol-baseline sizing and 20x vectors while making price approval snapshot-based', () => {
     const result = validateProductApprovalReview();
     expect(result.ready).to.equal(true);
     expect(result.blockers).to.deep.equal([]);
+    expect(result.backendProtocolBaselineCommit).to.equal(BACKEND_PROTOCOL_BASELINE_COMMIT);
+    expect(result).not.to.have.property('backendBetaCommit');
     expect(
       result.marketVectors.map((market) => [
         market.symbol,
@@ -258,6 +335,8 @@ describe('Galileo signed Stork deployment packet', () => {
     const review = JSON.parse(
       fs.readFileSync(path.resolve(__dirname, '..', 'config', 'galileo.product-approval-review.json'), 'utf8')
     );
+    expect(review.contractSource.releaseCommit).to.equal(GALILEO_CONTRACT_PACKET_BASE_COMMIT);
+    expect(review.contractSource.releaseTree).to.equal(GALILEO_CONTRACT_PACKET_BASE_TREE);
     expect(review.initialPricePolicy.graphPreparationRequiresSnapshot).to.equal(false);
     expect(review.initialPricePolicy.snapshotRequiredBeforeFirstPriceBearingTransaction).to.equal(true);
     expect(review.initialPricePolicy).not.to.have.property('snapshotRequiredBeforeFirstTransaction');
