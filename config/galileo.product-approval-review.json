@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "reviewId": "bond-perpdex-galileo-product-vectors",
   "chainId": 16602,
   "collateral": {
@@ -13,19 +13,21 @@
   },
   "contractSource": {
     "repository": "Bond-xyz/vertex-contracts",
-    "releaseCommit": "9fa1d37e2f6dfcbc695f28d69b593e65e9457de3",
+    "releaseCommit": "8ac5c9f3dfd4c5afc33e940400ead69c719fe043",
+    "releaseTree": "fa7c4782c141c55ab8ecfa51a297bec1c6a4c43f",
     "productsFile": "config/galileo.products.json"
   },
   "rustSource": {
     "repository": "Bond-xyz/perpdex-rust-backend",
     "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "releaseCommitRole": "reviewed_protocol_baseline_only",
     "symbolsFile": "core/types/src/symbol.rs",
     "baseDecimals": 8
   },
   "initialPricePolicy": {
     "source": "verified_stork_deployment_snapshot",
     "policyFile": "config/galileo.stork-deployment-policy.json",
-    "policySha256": "e4bd24787070b393bb2e3a0ea4a7c65d40129eb927d5b8afcaca60d1674372a7",
+    "policySha256": "b8fbc5dcdd86a8af8b67667698758e24ba0222eedeec62f72065da82481413c6",
     "staticPriceAllowed": false,
     "snapshotTracked": false,
     "graphPreparationRequiresSnapshot": false,

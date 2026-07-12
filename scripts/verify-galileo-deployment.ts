@@ -163,11 +163,15 @@ async function main() {
     deploymentIntentFile,
   });
   if (
-    manifest.source.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    manifest.source.backendProtocolBaselineCommit !== BACKEND_BETA_COMMIT ||
+    JSON.stringify(manifest.source.backendRuntimeRelease) !==
+      JSON.stringify(verifiedRelease.staticPolicy.policy.backend.runtimeRelease) ||
     manifest.source.storkPolicySha256 !== verifiedRelease.staticPolicy.policySha256 ||
     manifest.source.collateralProvenanceSha256 !== verifiedRelease.staticPolicy.collateralProvenanceSha256 ||
     manifest.oracle?.provider !== 'stork' ||
-    manifest.oracle?.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    manifest.oracle?.backendProtocolBaselineCommit !== BACKEND_BETA_COMMIT ||
+    JSON.stringify(manifest.oracle?.backendRuntimeRelease) !==
+      JSON.stringify(verifiedRelease.staticPolicy.policy.backend.runtimeRelease) ||
     manifest.oracle?.policyFile !== TRACKED_STORK_DEPLOYMENT_POLICY ||
     manifest.oracle?.policySha256 !== verifiedRelease.staticPolicy.policySha256 ||
     manifest.oracle?.snapshotTracked !== false
