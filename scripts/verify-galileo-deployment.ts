@@ -9,8 +9,9 @@ import {
   GALILEO_USDCE_DECIMALS,
   GALILEO_USDCE_SYMBOL,
   requireGalileoUsdce,
+  resolveProductsWithStorkPrices,
 } from './deployment-config';
-import type { ProductConfig } from './deployment-config';
+import type { DeploymentProductConfig } from './deployment-config';
 import {
   assertVerifierPublicKeysMatch,
   assertBuildEvidenceMatches,
@@ -29,6 +30,16 @@ import {
 import { TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
 import { collectAndVerifyRedTestnetReleaseEvidence, TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
+import {
+  assertStorkDeploymentSnapshotFresh,
+  assertStorkObservationBlock,
+  BACKEND_BETA_COMMIT,
+  storkPricesByProductId,
+  storkSnapshotSha256,
+  TRACKED_COLLATERAL_PROVENANCE,
+  TRACKED_STORK_DEPLOYMENT_POLICY,
+  validateStorkDeploymentSnapshot,
+} from './stork-deployment-snapshot';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -52,12 +63,41 @@ type ManifestMarket = ManifestMarketConfig & {
   virtualBook: string;
   runtimeCodeHash: string;
   creation: ContractCreationEvidence;
+  priceWrite: { transactionHash: string; blockNumber: number; blockHash: string; status: number };
 };
+
+async function verifyPriceWriteEvidence(
+  evidence: { transactionHash: string; blockNumber: number; blockHash: string; status: number } | undefined,
+  label: string
+): Promise<{ timestamp: number }> {
+  if (
+    !evidence ||
+    evidence.status !== 1 ||
+    !ethers.utils.isHexString(evidence.transactionHash, 32) ||
+    !ethers.utils.isHexString(evidence.blockHash, 32)
+  ) {
+    throw new Error(`${label} manifest receipt evidence is invalid`);
+  }
+  const receipt = await ethers.provider.getTransactionReceipt(evidence.transactionHash);
+  if (
+    !receipt ||
+    receipt.status !== 1 ||
+    receipt.blockNumber !== evidence.blockNumber ||
+    receipt.blockHash.toLowerCase() !== evidence.blockHash.toLowerCase()
+  ) {
+    throw new Error(`${label} live receipt does not match manifest block evidence`);
+  }
+  const block = await ethers.provider.getBlock(evidence.blockNumber);
+  if (!block || !block.hash || block.hash.toLowerCase() !== evidence.blockHash.toLowerCase()) {
+    throw new Error(`${label} deployment block/hash is unavailable or reorged`);
+  }
+  return { timestamp: block.timestamp };
+}
 
 function assertManifestMarketMatchesConfig(
   symbol: string,
   market: ManifestMarketConfig | undefined,
-  product: ProductConfig
+  product: DeploymentProductConfig
 ): void {
   if (!market) throw new Error(`manifest market is missing for ${symbol}`);
   for (const field of ['productId', 'sizeIncrementX18', 'minSizeX18', 'lpSpreadX18']) {
@@ -81,8 +121,8 @@ function assertManifestMarketMatchesConfig(
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (manifest.schemaVersion !== 7) {
-    throw new Error('deployment manifest must use tracked-Red-approval provenance schema version 7');
+  if (manifest.schemaVersion !== 8) {
+    throw new Error('deployment manifest must use signed-Stork provenance schema version 8');
   }
   if (manifest.release !== GALILEO_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
   const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
@@ -113,6 +153,32 @@ async function main() {
     deploymentIntentFile,
   });
   if (
+    manifest.source.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    manifest.source.storkPolicySha256 !== verifiedRelease.staticPolicy.policySha256 ||
+    manifest.source.collateralProvenanceSha256 !== verifiedRelease.staticPolicy.collateralProvenanceSha256 ||
+    manifest.oracle?.provider !== 'stork' ||
+    manifest.oracle?.backendBetaCommit !== BACKEND_BETA_COMMIT ||
+    manifest.oracle?.policyFile !== TRACKED_STORK_DEPLOYMENT_POLICY ||
+    manifest.oracle?.policySha256 !== verifiedRelease.staticPolicy.policySha256 ||
+    manifest.oracle?.snapshotTracked !== false
+  ) {
+    throw new Error('deployment manifest is not bound to the approved backend/Stork/collateral policy');
+  }
+  const verifiedSnapshot = validateStorkDeploymentSnapshot(
+    manifest.oracle.snapshot,
+    verifiedRelease.staticPolicy.policy,
+    verifiedRelease.staticPolicy.policySha256
+  );
+  const snapshotSha256 = storkSnapshotSha256(verifiedSnapshot);
+  if (
+    manifest.oracle.snapshotSha256 !== snapshotSha256 ||
+    manifest.source.storkSnapshotSha256 !== snapshotSha256 ||
+    manifest.oracle.signedTimestampSpreadNs !== verifiedSnapshot.signedTimestampSpreadNs ||
+    JSON.stringify(manifest.oracle.observationBlock) !== JSON.stringify(verifiedSnapshot.observationBlock)
+  ) {
+    throw new Error('deployment manifest signed Stork snapshot hash or observation evidence mismatch');
+  }
+  if (
     manifest.deployer !== verifiedRelease.deploymentIntent.deployer ||
     manifest.sequencer !== verifiedRelease.deploymentIntent.sequencer
   ) {
@@ -125,6 +191,17 @@ async function main() {
     !/^[0-9a-f]{64}$/i.test(manifest.openZeppelin?.manifestSha256 || '')
   ) {
     throw new Error('deployment manifest does not prove the Red-approved fresh-deployment boundary');
+  }
+  if (
+    manifest.preparation?.phase !== 'prepared_no_price_writes' ||
+    manifest.preparation?.noPriceWritesAtPreparation !== true ||
+    !/^[0-9a-f]{64}$/i.test(manifest.preparation?.preparedFileSha256 || '') ||
+    manifest.gates?.twoPhasePrepareFinalize !== true ||
+    manifest.gates?.staticApprovalBeforeFirstPreparationTransaction !== true ||
+    manifest.gates?.signedStorkSnapshotVerifiedImmediatelyBeforeEachPriceBroadcast !== true ||
+    manifest.gates?.endpointAndPerMarketPriceWriteBlocksRecorded !== true
+  ) {
+    throw new Error('deployment manifest does not prove the two-phase price-write boundary');
   }
   if (
     manifest.source.reviewedReleaseCommit !== verifiedRelease.source.releaseCommit ||
@@ -165,7 +242,19 @@ async function main() {
       throw new Error(`manifest runtime hash index mismatch for ${key}`);
     }
   }
-  const products = verifiedRelease.products;
+  const products = resolveProductsWithStorkPrices(verifiedRelease.products, storkPricesByProductId(verifiedSnapshot));
+  for (const feed of verifiedSnapshot.feeds) {
+    const recorded = manifest.oracle.prices?.[feed.symbol];
+    if (
+      recorded?.productId !== feed.productId ||
+      recorded?.feedId !== feed.feedId ||
+      recorded?.priceX18 !== feed.priceX18 ||
+      recorded?.signedTimestampNs !== feed.signedTimestampNs ||
+      recorded?.messageHash?.toLowerCase() !== feed.proof.messageHash.toLowerCase()
+    ) {
+      throw new Error(`manifest Stork price evidence mismatch for ${feed.symbol}`);
+    }
+  }
   const verifierConfig = verifiedRelease.verifierConfig;
   const verifierPublicKeys = normalizeVerifierPublicKeys([
     ...verifierConfig.keys,
@@ -201,7 +290,14 @@ async function main() {
     manifest.collateral?.decimals !== GALILEO_USDCE_DECIMALS ||
     manifest.collateral?.productId !== 0 ||
     manifest.collateral?.source !== 'existing' ||
-    manifest.collateral?.deployToken !== false
+    manifest.collateral?.deployToken !== false ||
+    manifest.collateral?.selectionMode !== 'static_pinned' ||
+    manifest.collateral?.runtimeRegistryLookup !== false ||
+    manifest.collateral?.provenanceOnly !== true ||
+    manifest.collateral?.provenanceFile !== TRACKED_COLLATERAL_PROVENANCE ||
+    manifest.collateral?.provenanceSha256 !== verifiedRelease.staticPolicy.collateralProvenanceSha256 ||
+    JSON.stringify(manifest.collateral?.provenance) !==
+      JSON.stringify(verifiedRelease.staticPolicy.collateralProvenance)
   ) {
     throw new Error('manifest does not pin the existing Galileo USDC.e collateral');
   }
@@ -222,6 +318,28 @@ async function main() {
     if ((await ethers.provider.getCode(address)) === '0x') {
       throw new Error(`missing bytecode at ${address}`);
     }
+  }
+  const observationBlock = await ethers.provider.getBlock(verifiedSnapshot.observationBlock.number);
+  if (!observationBlock) throw new Error('manifest Stork observation block is unavailable');
+  assertStorkObservationBlock(verifiedSnapshot, observationBlock);
+  const endpointPriceBlock = await verifyPriceWriteEvidence(manifest.oracle.endpointInitialize, 'Endpoint.initialize');
+  assertStorkDeploymentSnapshotFresh(
+    verifiedSnapshot,
+    verifiedRelease.staticPolicy.policy,
+    BigInt(endpointPriceBlock.timestamp) * 1_000_000_000n
+  );
+  for (const feed of verifiedSnapshot.feeds) {
+    const oracleWrite = manifest.oracle.prices?.[feed.symbol]?.priceWrite;
+    const marketWrite = manifest.markets?.[feed.symbol]?.priceWrite;
+    if (JSON.stringify(oracleWrite) !== JSON.stringify(marketWrite)) {
+      throw new Error(`${feed.symbol} price-write evidence differs between oracle and market records`);
+    }
+    const priceBlock = await verifyPriceWriteEvidence(oracleWrite, `${feed.symbol} addProduct`);
+    assertStorkDeploymentSnapshotFresh(
+      verifiedSnapshot,
+      verifiedRelease.staticPolicy.policy,
+      BigInt(priceBlock.timestamp) * 1_000_000_000n
+    );
   }
 
   const endpoint = await ethers.getContractAt('Endpoint', manifest.contracts.endpoint.proxy);
