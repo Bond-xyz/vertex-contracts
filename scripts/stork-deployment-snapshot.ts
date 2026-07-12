@@ -16,6 +16,10 @@ export const BACKEND_BETA_COMMIT = BACKEND_PROTOCOL_BASELINE_COMMIT;
 export const TRACKED_STORK_DEPLOYMENT_POLICY = 'config/galileo.stork-deployment-policy.json';
 export const TRACKED_COLLATERAL_PROVENANCE = 'config/galileo.collateral-provenance.json';
 export const DEFAULT_STORK_DEPLOYMENT_SNAPSHOT = 'config/galileo.stork-deployment-snapshot.local.json';
+export const BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS = 'blocked_pending_reviewed_cross_feed_timestamp_spread';
+export const BLOCKED_STORK_COHERENCE_DECISION = 'pending_explicit_red_policy_input';
+export const APPROVED_STORK_DEPLOYMENT_POLICY_STATUS = 'approved_for_galileo_testnet_release';
+export const APPROVED_STORK_COHERENCE_DECISION = 'approve_exact_galileo_testnet_cross_feed_timestamp_spread';
 
 const STORK_AGGREGATOR = '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44';
 const STORK_CHECKSUM = '9be7e9f9ed459417d96112a7467bd0b27575a2c7847195c68f805b70ce1795ba';
@@ -268,10 +272,17 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
   }
   if (
     policy.coherence.maxSignedTimestampSpreadSeconds === null &&
-    (policy.status !== 'blocked_pending_reviewed_cross_feed_timestamp_spread' ||
-      policy.coherence.decision !== 'pending_explicit_red_policy_input')
+    (policy.status !== BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS ||
+      policy.coherence.decision !== BLOCKED_STORK_COHERENCE_DECISION)
   ) {
     throw new Error('unset cross-feed signed timestamp spread must remain explicitly fail-closed pending Red');
+  }
+  if (
+    policy.coherence.maxSignedTimestampSpreadSeconds !== null &&
+    (policy.status !== APPROVED_STORK_DEPLOYMENT_POLICY_STATUS ||
+      policy.coherence.decision !== APPROVED_STORK_COHERENCE_DECISION)
+  ) {
+    throw new Error('reviewed cross-feed signed timestamp spread must use the exact approved Galileo testnet state');
   }
   return policy;
 }
