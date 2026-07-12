@@ -26,6 +26,7 @@ import {
   verifyRuntimeArtifact,
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
+  sha256File,
 } from './release-evidence';
 import { TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
 import { collectAndVerifyRedTestnetReleaseEvidence, TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
@@ -40,6 +41,15 @@ import {
   TRACKED_STORK_DEPLOYMENT_POLICY,
   validateStorkDeploymentSnapshot,
 } from './stork-deployment-snapshot';
+import {
+  assertSingleAddProductEvent,
+  deterministicSha256,
+  FinalizationStepPlan,
+  loadAndValidateFinalizationJournal,
+  portableArtifactReference,
+  resolvePortableArtifactReference,
+  verifyCanonicalFinalizationEvidence,
+} from './galileo-finalization-journal';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -121,8 +131,8 @@ function assertManifestMarketMatchesConfig(
 async function main() {
   const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (manifest.schemaVersion !== 8) {
-    throw new Error('deployment manifest must use signed-Stork provenance schema version 8');
+  if (manifest.schemaVersion !== 9) {
+    throw new Error('deployment manifest must use durable signed-Stork finalization schema version 9');
   }
   if (manifest.release !== GALILEO_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
   const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
@@ -198,7 +208,12 @@ async function main() {
     !/^[0-9a-f]{64}$/i.test(manifest.preparation?.preparedFileSha256 || '') ||
     manifest.gates?.twoPhasePrepareFinalize !== true ||
     manifest.gates?.staticApprovalBeforeFirstPreparationTransaction !== true ||
+    manifest.gates?.graphPreparationDoesNotClaimFreshPriceSnapshot !== true ||
+    manifest.gates?.signedStorkSnapshotRequiredBeforeFirstPriceBearingTransaction !== true ||
+    manifest.gates?.durableSequentialFinalizationJournalComplete !== true ||
     manifest.gates?.signedStorkSnapshotVerifiedImmediatelyBeforeEachPriceBroadcast !== true ||
+    manifest.gates?.signedStorkSnapshotVerifiedAgainstEveryReceiptBlock !== true ||
+    manifest.gates?.exactFinalizationTransactionAndEventParity !== true ||
     manifest.gates?.endpointAndPerMarketPriceWriteBlocksRecorded !== true
   ) {
     throw new Error('deployment manifest does not prove the two-phase price-write boundary');
@@ -243,6 +258,151 @@ async function main() {
     }
   }
   const products = resolveProductsWithStorkPrices(verifiedRelease.products, storkPricesByProductId(verifiedSnapshot));
+  const finalizationJournalFile = resolvePortableArtifactReference(
+    manifestFile,
+    manifest.finalization?.journalReference
+  );
+  if (
+    process.env.PERPDEX_FINALIZATION_JOURNAL &&
+    path.resolve(process.env.PERPDEX_FINALIZATION_JOURNAL) !== finalizationJournalFile
+  ) {
+    throw new Error('requested finalization journal does not match the portable manifest packet reference');
+  }
+  if (
+    !fs.existsSync(finalizationJournalFile) ||
+    manifest.finalization?.journalSha256 !== sha256File(finalizationJournalFile) ||
+    manifest.finalization?.status !== 'complete' ||
+    manifest.finalization?.finalityConfirmations !== 12 ||
+    !Number.isSafeInteger(manifest.finalization?.finalityHeadBlock) ||
+    !/^[0-9a-f]{64}$/i.test(manifest.finalization?.planSha256 || '') ||
+    !Number.isSafeInteger(manifest.finalization?.startingNonce) ||
+    !Number.isSafeInteger(manifest.finalization?.scanFromBlock) ||
+    manifest.finalization?.leaseScope !== 'single_host_local_eoa_no_cross_host' ||
+    manifest.finalization.startingNonce !== manifest.preparation?.finalizationBoundary?.startingNonce ||
+    manifest.finalization.scanFromBlock !== manifest.preparation?.finalizationBoundary?.blockNumber ||
+    !ethers.utils.isHexString(manifest.preparation?.finalizationBoundary?.blockHash || '', 32) ||
+    !/^[0-9a-f]{64}$/i.test(manifest.preparation?.finalizationBoundary?.releaseStateHostIdentity || '') ||
+    manifest.preparation?.finalizationBoundary?.leaseScope !== 'single_host_local_eoa_no_cross_host'
+  ) {
+    throw new Error('deployment manifest finalization journal evidence is missing or changed');
+  }
+  const preparationBoundaryBlock = await ethers.provider.getBlock(
+    manifest.preparation.finalizationBoundary.blockNumber
+  );
+  if (
+    !preparationBoundaryBlock?.hash ||
+    preparationBoundaryBlock.hash.toLowerCase() !== manifest.preparation.finalizationBoundary.blockHash.toLowerCase() ||
+    (await ethers.provider.getTransactionCount(
+      manifest.deployer,
+      manifest.preparation.finalizationBoundary.blockNumber
+    )) !== manifest.preparation.finalizationBoundary.startingNonce
+  ) {
+    throw new Error('deployment manifest preparation/finalization boundary is unavailable, reorged, or changed');
+  }
+  const endpointInterface = new ethers.utils.Interface((await artifacts.readArtifact('Endpoint')).abi);
+  const perpEngineInterface = new ethers.utils.Interface((await artifacts.readArtifact('PerpEngine')).abi);
+  const endpointArguments = [
+    manifest.contracts.sanctions.address,
+    manifest.sequencer,
+    manifest.contracts.offchainExchange.proxy,
+    manifest.contracts.clearinghouse.proxy,
+    manifest.contracts.verifier.proxy,
+    (() => {
+      const prices = Array(Math.max(...products.products.map((product) => product.productId)) + 1).fill('0');
+      prices[0] = ethers.utils.parseUnits('1', 18).toString();
+      for (const product of products.products) prices[product.productId] = product.risk.priceX18;
+      return prices;
+    })(),
+  ];
+  const endpointCalldata = endpointInterface.encodeFunctionData('initialize', endpointArguments);
+  const finalizationSteps: FinalizationStepPlan[] = [
+    {
+      id: 'endpoint.initialize',
+      kind: 'endpoint_initialize',
+      from: manifest.deployer,
+      to: manifest.contracts.endpoint.proxy,
+      nonce: manifest.finalization.startingNonce,
+      value: '0',
+      calldata: endpointCalldata,
+      selector: endpointCalldata.slice(0, 10),
+      argsSha256: deterministicSha256(endpointArguments),
+    },
+  ];
+  for (const [index, product] of products.products.entries()) {
+    const args = [
+      product.productId,
+      manifest.markets[product.symbol].virtualBook,
+      product.sizeIncrementX18,
+      product.minSizeX18,
+      product.lpSpreadX18,
+      { ...product.risk },
+    ];
+    const calldata = perpEngineInterface.encodeFunctionData('addProduct', args);
+    finalizationSteps.push({
+      id: `perp.addProduct.${product.productId}`,
+      kind: 'perp_add_product',
+      symbol: product.symbol,
+      productId: product.productId,
+      from: manifest.deployer,
+      to: manifest.contracts.perpEngine.proxy,
+      nonce: manifest.finalization.startingNonce + index + 1,
+      value: '0',
+      calldata,
+      selector: calldata.slice(0, 10),
+      argsSha256: deterministicSha256(args),
+    });
+  }
+  const finalizationJournal = loadAndValidateFinalizationJournal(finalizationJournalFile, {
+    schemaVersion: 1,
+    release: GALILEO_RELEASE_ID,
+    chainId: GALILEO_CHAIN_ID,
+    preparedFileSha256: manifest.preparation.preparedFileSha256,
+    snapshotSha256,
+    manifestReference: portableArtifactReference(finalizationJournalFile, manifestFile),
+    deployer: manifest.deployer,
+    startingNonce: manifest.finalization.startingNonce,
+    scanFromBlock: manifest.finalization.scanFromBlock,
+    preparationBoundaryBlockHash: manifest.preparation.finalizationBoundary.blockHash,
+    releaseStateHostIdentity: manifest.preparation.finalizationBoundary.releaseStateHostIdentity,
+    leaseScope: 'single_host_local_eoa_no_cross_host',
+    finalityConfirmations: 12,
+    steps: finalizationSteps,
+  });
+  if (
+    finalizationJournal.status !== 'complete' ||
+    finalizationJournal.planSha256 !== manifest.finalization.planSha256 ||
+    Math.max(...finalizationJournal.steps.map((step) => step.finality!.observedHeadBlock)) !==
+      manifest.finalization.finalityHeadBlock ||
+    JSON.stringify(finalizationJournal.steps) !== JSON.stringify(manifest.finalization.steps)
+  ) {
+    throw new Error('deployment manifest does not embed the exact complete finalization journal');
+  }
+  const liveFinalityHead = await ethers.provider.getBlockNumber();
+  if (liveFinalityHead < manifest.finalization.finalityHeadBlock) {
+    throw new Error('live chain head precedes recorded 12-confirmation finality evidence');
+  }
+  for (const [index, step] of finalizationSteps.entries()) {
+    const receiptEvidence = finalizationJournal.steps[index].receipt!;
+    if (liveFinalityHead - receiptEvidence.blockNumber + 1 < 12) {
+      throw new Error(`${step.id} no longer has the required 12 confirmations`);
+    }
+    const manifestReceipt =
+      step.kind === 'endpoint_initialize'
+        ? manifest.oracle.endpointInitialize
+        : manifest.oracle.prices?.[step.symbol!]?.priceWrite;
+    if (JSON.stringify(receiptEvidence) !== JSON.stringify(manifestReceipt)) {
+      throw new Error(`${step.id} journal receipt differs from manifest price-write evidence`);
+    }
+    const canonical = await verifyCanonicalFinalizationEvidence(ethers.provider, step, receiptEvidence);
+    assertStorkDeploymentSnapshotFresh(
+      verifiedSnapshot,
+      verifiedRelease.staticPolicy.policy,
+      BigInt(canonical.block.timestamp) * 1_000_000_000n
+    );
+    if (step.kind === 'perp_add_product') {
+      assertSingleAddProductEvent(canonical.receipt, manifest.contracts.perpEngine.proxy, step.productId!);
+    }
+  }
   for (const feed of verifiedSnapshot.feeds) {
     const recorded = manifest.oracle.prices?.[feed.symbol];
     if (
@@ -493,6 +653,11 @@ async function main() {
   }
   if ((await endpoint.getSequencer()) !== manifest.sequencer) {
     throw new Error('sequencer mismatch');
+  }
+  for (const product of products.products) {
+    if (!BigNumber.from(await endpoint.getPriceX18(product.productId)).eq(product.risk.priceX18)) {
+      throw new Error(`${product.symbol} Endpoint price does not match exact signed Stork X18 value`);
+    }
   }
   const releaseMode = BigNumber.from(await clearinghouse.getReleaseMode()).toNumber();
   if (

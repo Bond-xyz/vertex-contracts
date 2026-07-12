@@ -28,7 +28,8 @@
     "policySha256": "e4bd24787070b393bb2e3a0ea4a7c65d40129eb927d5b8afcaca60d1674372a7",
     "staticPriceAllowed": false,
     "snapshotTracked": false,
-    "snapshotRequiredBeforeFirstTransaction": true
+    "graphPreparationRequiresSnapshot": false,
+    "snapshotRequiredBeforeFirstPriceBearingTransaction": true
   },
   "riskModel": {
     "initialMarginPercent": "5",

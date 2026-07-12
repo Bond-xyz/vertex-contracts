@@ -52,7 +52,8 @@ type ProductApprovalReview = {
     policySha256: string;
     staticPriceAllowed: boolean;
     snapshotTracked: boolean;
-    snapshotRequiredBeforeFirstTransaction: boolean;
+    graphPreparationRequiresSnapshot: boolean;
+    snapshotRequiredBeforeFirstPriceBearingTransaction: boolean;
   };
   riskModel: {
     initialMarginPercent: string;
@@ -160,9 +161,12 @@ export function validateProductApprovalReview(
     review.initialPricePolicy.policySha256 !== stork.policySha256 ||
     review.initialPricePolicy.staticPriceAllowed !== false ||
     review.initialPricePolicy.snapshotTracked !== false ||
-    review.initialPricePolicy.snapshotRequiredBeforeFirstTransaction !== true
+    review.initialPricePolicy.graphPreparationRequiresSnapshot !== false ||
+    review.initialPricePolicy.snapshotRequiredBeforeFirstPriceBearingTransaction !== true
   ) {
-    throw new Error('product review must require exact verified Stork prices before the first transaction');
+    throw new Error(
+      'product review must allow non-price graph preparation and require exact verified Stork prices before the first price-bearing transaction'
+    );
   }
   if (review.rustSource.baseDecimals !== 8) {
     throw new Error('Rust product quantities must use the tracked 8-decimal base-unit representation');

@@ -139,8 +139,14 @@ describe('Galileo signed Stork deployment packet', () => {
       deploySource.indexOf('prepared graph was already finalized')
     );
     expect(deploySource.indexOf('collectGalileoStorkReleasePreflight({')).to.be.lessThan(
-      deploySource.indexOf('const endpointInitializeTx')
+      deploySource.indexOf('const journal = await runDurableFinalization')
     );
+    expect(deploySource.indexOf('assertProductionFinalizationEntryState({')).to.be.lessThan(
+      deploySource.indexOf('const journal = await runDurableFinalization')
+    );
+    expect(deploySource).to.contain('expectedOwner: prepared.deployer');
+    expect(deploySource).to.contain('expectedSequencer: prepared.sequencer');
+    expect(deploySource).not.to.contain('const endpointInitializeTx');
     expect(deploySource).not.to.contain('verifiedSignedStorkSnapshotBeforeFirstProviderReadAndTransaction');
   });
 
@@ -249,6 +255,12 @@ describe('Galileo signed Stork deployment packet', () => {
     expect(
       result.marketVectors.every((market) => market.initialPriceSource === 'verified_stork_deployment_snapshot')
     ).to.equal(true);
+    const review = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, '..', 'config', 'galileo.product-approval-review.json'), 'utf8')
+    );
+    expect(review.initialPricePolicy.graphPreparationRequiresSnapshot).to.equal(false);
+    expect(review.initialPricePolicy.snapshotRequiredBeforeFirstPriceBearingTransaction).to.equal(true);
+    expect(review.initialPricePolicy).not.to.have.property('snapshotRequiredBeforeFirstTransaction');
   });
 
   it('rejects stale and future-dated signed evidence independently of signature validity', () => {
