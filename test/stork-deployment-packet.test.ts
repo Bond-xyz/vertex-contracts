@@ -67,7 +67,7 @@ describe('Galileo signed Stork deployment packet', () => {
     } catch (caught) {
       error = caught;
     }
-    expect((error as Error).message).to.contain('cross-feed signed timestamp spread policy is unresolved');
+    expect((error as Error).message).to.contain('final immutable backend artifact/source binding is unresolved');
 
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-stork-preflight-'));
     fs.mkdirSync(path.join(temporaryRoot, 'config'));
@@ -155,7 +155,7 @@ describe('Galileo signed Stork deployment packet', () => {
     expect(providerOrTransactionCalls).to.equal(0);
 
     expect(() => createTrackedGalileoDeploymentIntent()).to.throw(
-      'cross-feed signed timestamp spread policy is unresolved'
+      'final immutable backend artifact/source binding is unresolved'
     );
     const deploySource = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'deploy-galileo.ts'), 'utf8');
     expect(deploySource.indexOf('const preflight = await collectAndVerifyRedTestnetReleaseEvidence')).to.be.lessThan(
@@ -183,7 +183,7 @@ describe('Galileo signed Stork deployment packet', () => {
     ).to.be.lessThan(packetCreatorSource.indexOf('fs.writeFileSync(outputFile'));
   });
 
-  it('pins the reviewed protocol baseline while leaving the runtime artifact and cross-feed spread unresolved', () => {
+  it('pins the reviewed protocol baseline and Red-approved spread while leaving the runtime artifact unresolved', () => {
     const { policy } = loadTrackedStorkDeploymentPolicy();
     expect(policy.backend.repository).to.equal('Bond-xyz/perpdex-rust-backend');
     expect(policy.backend.releaseCommit).to.equal(BACKEND_PROTOCOL_BASELINE_COMMIT);
@@ -222,10 +222,10 @@ describe('Galileo signed Stork deployment packet', () => {
     expect(policy.verifier.maxFutureSkewSeconds).to.equal(2);
     expect(policy.verifier.aggregatorPublicKey).to.equal('0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44');
     expect(policy.feeds.map((feed) => feed.feedId)).to.deep.equal(['BTCUSD', 'ETHUSD', 'SOLUSD', '0GUSD']);
-    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
+    expect(policy.status).to.equal(APPROVED_STORK_DEPLOYMENT_POLICY_STATUS);
+    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(3);
     expect(policy.coherence.decisionOwner).to.equal('Red');
-    expect(policy.status).to.equal(BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS);
-    expect(policy.coherence.decision).to.equal(BLOCKED_STORK_COHERENCE_DECISION);
+    expect(policy.coherence.decision).to.equal(APPROVED_STORK_COHERENCE_DECISION);
     expect(() =>
       validateStorkDeploymentSnapshot(
         {
@@ -255,7 +255,7 @@ describe('Galileo signed Stork deployment packet', () => {
         policy,
         '00'.repeat(32)
       )
-    ).to.throw('cross-feed signed timestamp spread policy is unresolved');
+    ).to.throw('Stork deployment snapshot must contain exactly four launch feeds');
   });
 
   it('bounds a reviewed cross-feed spread to the backend Stork max-age policy', () => {
@@ -278,7 +278,7 @@ describe('Galileo signed Stork deployment packet', () => {
     for (const validSpread of [1, policy.verifier.maxAgeSeconds]) {
       expect(() => validateStorkDeploymentPolicy(withSpread(validSpread))).not.to.throw();
     }
-    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(null);
+    expect(policy.coherence.maxSignedTimestampSpreadSeconds).to.equal(3);
   });
 
   it('pins exact blocked and approved Stork policy state pairs and rejects arbitrary or mixed states', () => {
@@ -292,8 +292,17 @@ describe('Galileo signed Stork deployment packet', () => {
         decision: APPROVED_STORK_COHERENCE_DECISION,
       },
     };
+    const blocked = {
+      ...policy,
+      status: BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS,
+      coherence: {
+        ...policy.coherence,
+        maxSignedTimestampSpreadSeconds: null,
+        decision: BLOCKED_STORK_COHERENCE_DECISION,
+      },
+    };
 
-    expect(() => validateStorkDeploymentPolicy(policy)).not.to.throw();
+    expect(() => validateStorkDeploymentPolicy(blocked)).not.to.throw();
     expect(() => validateStorkDeploymentPolicy(approved)).not.to.throw();
 
     for (const candidate of [
@@ -308,10 +317,10 @@ describe('Galileo signed Stork deployment packet', () => {
     }
 
     for (const candidate of [
-      { ...policy, status: APPROVED_STORK_DEPLOYMENT_POLICY_STATUS },
-      { ...policy, status: 'blocked' },
-      { ...policy, coherence: { ...policy.coherence, decision: APPROVED_STORK_COHERENCE_DECISION } },
-      { ...policy, coherence: { ...policy.coherence, decision: 'pending' } },
+      { ...blocked, status: APPROVED_STORK_DEPLOYMENT_POLICY_STATUS },
+      { ...blocked, status: 'blocked' },
+      { ...blocked, coherence: { ...blocked.coherence, decision: APPROVED_STORK_COHERENCE_DECISION } },
+      { ...blocked, coherence: { ...blocked.coherence, decision: 'pending' } },
     ]) {
       expect(() => validateStorkDeploymentPolicy(candidate)).to.throw(
         'unset cross-feed signed timestamp spread must remain explicitly fail-closed pending Red'
