@@ -76,9 +76,9 @@ corepack yarn keys:galileo
 
 The approved static launch vector contains only sizing and 20x risk weights. It contains no BTC, ETH, SOL, or 0G reference price. Finalization requires one untracked packet containing the exact signed `BTCUSD`, `ETHUSD`, `SOLUSD`, and `0GUSD` Stork proofs plus a canonical Galileo observation block. The packet creator verifies feed identity, price/proof parity, the pinned aggregator signature, median-v1 checksum, signed freshness and future skew, the observation block timestamp, and the reviewed cross-feed signed-timestamp spread before it writes the packet. Finalization verifies the packet again before every price-bearing broadcast and against every receipt block.
 
-The cross-feed maximum signed-timestamp spread is deliberately `null` in [`config/galileo.stork-deployment-policy.json`](config/galileo.stork-deployment-policy.json). Red is the decision owner. While it is null, the validator requires the exact fail-closed pair `status = blocked_pending_reviewed_cross_feed_timestamp_spread` and `coherence.decision = pending_explicit_red_policy_input`. After Red supplies the exact reviewed integer, the only accepted testnet pair is `status = approved_for_galileo_testnet_release` and `coherence.decision = approve_exact_galileo_testnet_cross_feed_timestamp_spread`. Arbitrary or mixed states fail before packet creation, deployment intent creation, graph preparation, or finalization. The Stork coherence decision does not replace the separately tracked Red release approval. No proposed value, including three seconds, is an approved substitute.
+Red approved a three-second maximum signed-timestamp spread for the Galileo testnet launch feeds on July 12, 2026. The tracked policy uses the exact accepted pair `status = approved_for_galileo_testnet_release` and `coherence.decision = approve_exact_galileo_testnet_cross_feed_timestamp_spread`. Arbitrary or mixed states fail before packet creation, deployment intent creation, graph preparation, or finalization, and any four-feed set spanning more than three seconds is rejected. This coherence decision does not replace the separately tracked Red release approval.
 
-After that decision is committed and reviewed, create the untracked verified packet from a no-secret Stork response and matching public block evidence:
+Using that committed and reviewed decision, create the untracked verified packet from a no-secret Stork response and matching public block evidence:
 
 ```bash
 export PERPDEX_STORK_RAW_RESPONSE_FILE=./config/galileo.stork-raw-response.local.json
@@ -91,14 +91,13 @@ The packet records each feed identity, exact X18 value, signed timestamp, signat
 
 The backend commit `1d174da2f130cf6f4f03b29029a002d92acc76f8` is only the reviewed protocol baseline used for the withdrawal, sizing, and Stork compatibility checks in this packet. It is not the deployable backend. The final runtime source commit and immutable artifact-manifest SHA-256 are deliberately `null` in the tracked Stork policy. Release preparation remains blocked until the final reviewed Linux artifact supplies both values together; the policy hash then binds them into the deployment intent, Red approval, attestation, Stork packet, and final manifest.
 
-The deployment remains fail-closed until all tracked blockers are resolved in a reviewed candidate:
+The deployment remains fail-closed until all remaining tracked blockers are resolved in a reviewed candidate:
 
-1. Red supplies the exact cross-feed maximum signed-timestamp spread. It is currently unset and blocks every release phase.
-2. Bind the exact final backend source commit and immutable Linux artifact-manifest SHA-256. The reviewed `1d174da2` protocol baseline cannot fill either field.
-3. The reviewed Stork policy and Galileo-only release policy change to their approved testnet states; mainnet external review remains required.
-4. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent-agent review evidence for the exact candidate.
-5. Generate the pending tracked Red approval, have Red approve the exact hashes, and commit only that artifact after the candidate.
-6. Capture and verify one fresh four-feed Stork packet immediately before finalization. Any missing, stale, future-skewed, incoherent, tampered, or reorged evidence stops before the next transaction.
+1. Bind the exact final backend source commit and immutable Linux artifact-manifest SHA-256. The reviewed `1d174da2` protocol baseline cannot fill either field.
+2. The Galileo-only release policy changes to its approved testnet state; mainnet external review remains required.
+3. Generate three Galileo-only Verifier keys, a current single-use deployment intent, and successful deterministic CI plus independent-agent review evidence for the exact candidate.
+4. Generate the pending tracked Red approval, have Red approve the exact hashes, and commit only that artifact after the candidate.
+5. Capture and verify one fresh four-feed Stork packet immediately before finalization. Any missing, stale, future-skewed, incoherent, tampered, or reorged evidence stops before the next transaction.
 
 No blocker may be bypassed with an environment variable.
 
