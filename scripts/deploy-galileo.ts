@@ -17,6 +17,7 @@ import {
   ArtifactRuntimeEvidence,
   assertFreshOpenZeppelinManifestAbsent,
   collectContractCreationEvidence,
+  decodeProductIds,
   inspectProxyDeployment,
   normalizeVerifierPublicKeys,
   ReleaseArtifactKey,
@@ -755,7 +756,7 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
     endpointSequencer: await endpoint.getSequencer(),
     expectedOwner: prepared.deployer,
     expectedSequencer: prepared.sequencer,
-    productIds: (await perpEngine['getProductIds()']()).map((value: BigNumber) => value.toNumber()),
+    productIds: decodeProductIds(await perpEngine['getProductIds()']()),
   });
   for (const market of Object.values(prepared.markets) as any[]) {
     await verifyVirtualBookProductId(
@@ -923,7 +924,7 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
       const product = productById.get(step.productId!);
       if (!product || product.symbol !== step.symbol) throw new Error(`${step.id} product provenance mismatch`);
       assertSingleAddProductEvent(confirmedReceipt, perpEngine.address, product.productId);
-      const actualProductIds = (await perpEngine['getProductIds()']()).map((value: BigNumber) => value.toNumber());
+      const actualProductIds = decodeProductIds(await perpEngine['getProductIds()']());
       assertCanonicalGalileoProductPrefix(actualProductIds, product.productId, product.symbol);
       const risk = await perpEngine.getRisk(product.productId);
       for (const [field, index, expectedValue] of [

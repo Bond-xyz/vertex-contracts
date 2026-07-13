@@ -16,11 +16,11 @@
     "role": "product_and_release_owner"
   },
   "decision": "approve_exact_galileo_testnet_release",
-  "approvedAt": "2026-07-13T14:21:47Z",
+  "approvedAt": "2026-07-13T15:09:53Z",
   "mainnetExternalReviewWaived": false,
   "candidate": {
-    "releaseCommit": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
-    "sourceTree": "55f5733b8106d80edda01d4566bf993f611929dc",
+    "releaseCommit": "4abb9de45d59795c830576dd78f938258adfca6b",
+    "sourceTree": "2c04fb97b43010c6c628918fa1303ebdff31b415",
     "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
     "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
     "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
@@ -30,20 +30,20 @@
     "verifierConfigSha256": "c66c78d683188153904bc4f8d19872ad32132d511d45c8f20a3e020d874b4c79",
     "verifierSignerCount": 3,
     "verifierSignerBitmask": 7,
-    "deploymentIntentId": "0xda37df7252b25269ba201896402174e82a1dad681a8d3680b13d191f4519b653",
-    "deploymentNonce": "202607131422",
-    "expiresAt": 1783974027,
+    "deploymentIntentId": "0x1347ba1ad7003247eb699856ec5184adaa78f83784851051925acd6cacdc2052",
+    "deploymentNonce": "202607131510",
+    "expiresAt": 1783976912,
     "deployer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
     "sequencer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
-    "firstTransactionNonce": 334,
-    "expectedFirstContract": "0x3dd0c7A1f6173400b5E66097D53BadA09a63Ef60"
+    "firstTransactionNonce": 360,
+    "expectedFirstContract": "0x6aF82f922Cc47f6d7fA4bb015ac949fDD1D7BBc0"
   },
   "deterministicCi": {
     "provider": "github_actions",
     "repository": "Bond-xyz/vertex-contracts",
     "workflow": "Galileo deterministic release gate",
-    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29257061568",
-    "headSha": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29260508548",
+    "headSha": "4abb9de45d59795c830576dd78f938258adfca6b",
     "conclusion": "success",
     "checks": [
       "compile",
@@ -55,11 +55,11 @@
   },
   "independentAgentReviews": [
     {
-      "agent": "Codex independent fresh-graph candidate reviewer",
-      "reviewedCommit": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
+      "agent": "Codex independent Galileo finalizer timing reviewer",
+      "reviewedCommit": "4abb9de45d59795c830576dd78f938258adfca6b",
       "conclusion": "approved",
-      "evidenceSha256": "d7dd8d665f1e10e0d6ca53e41f128aeb5bb52b6ca9bead83035753a884f5d1cd",
-      "summary": "Exact PR #18 candidate independently approved: the candidate removes only the spent prior single-use Red approval; its source tree is byte-for-byte identical to the previously reviewed pre-approval contract candidate. Exact-head deterministic CI passed compile, interface diff, product-vector review, release tests, and gitleaks. Live Galileo state confirmed deployer nonce 334, unused deterministic first-contract address, exact pinned USDC.e, and no funds or products in the abandoned unpublished graph."
+      "evidenceSha256": "a7ac0829b6d614751feffa8b9b23db4219f0edcd1f3a76614df8b248c82ec822",
+      "summary": "Exact candidate approved: product-ID decoding safely handles ethers number and BigNumber shapes; the finalizer durably ownership-journals and broadcasts exactly Endpoint.initialize plus product 2/4/6/8 in one same-signer gap-free nonce sequence before receipt waits, while canonical transaction, receipt, state, ownership, recovery, terminal-abandonment, and 12-confirmation checks remain fail closed. The pending-nonce rule permits only a contiguous one-attempt durable journal prefix. Signed Stork freshness is rechecked before every send and at receipt blocks under the unchanged 30-second age and 3-second spread policy. No Solidity, collateral, products, markets, Stork policy, or backend baseline changed; exact Galileo USDC.e remains pinned. Local release tests passed 91/91 and exact-head CI run 29260508548 passed compile, interface diff, product review, release tests, and gitleaks."
     }
   ]
 }

@@ -31,7 +31,7 @@ describe('unsigned Galileo CREATE/address plan', () => {
 
   it('allows address planning only for the exact reviewed fee-policy deployment script', () => {
     expect(GALILEO_DEPLOYMENT_SCRIPT_SHA256).to.equal(
-      '99dba0b0bc60b36b5ca10b5d9f46f68370e24e347806ab3c75d0c751bbaba5c3'
+      'ca93ac655c20b0dce20cea9f83b4c55bd8f106b8faedb3457365539be46d1735'
     );
     expect(() => assertGalileoDeploymentScriptMatchesPlan()).not.to.throw();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-fee-plan-'));

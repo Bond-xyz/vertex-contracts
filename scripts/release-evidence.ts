@@ -845,11 +845,15 @@ async function overloadedCall(
 }
 
 function exactNumberSet(actual: unknown[], expected: number[], label: string): void {
-  const actualValues = actual.map((value) => BigNumber.from(value).toNumber()).sort((left, right) => left - right);
+  const actualValues = decodeProductIds(actual).sort((left, right) => left - right);
   const expectedValues = [...expected].sort((left, right) => left - right);
   if (JSON.stringify(actualValues) !== JSON.stringify(expectedValues)) {
     throw new Error(`${label} mismatch: expected ${expectedValues.join(',')}, got ${actualValues.join(',')}`);
   }
+}
+
+export function decodeProductIds(values: readonly unknown[]): number[] {
+  return values.map((value) => BigNumber.from(value).toNumber());
 }
 
 function exactNumberish(actual: unknown, expected: BigNumberish, label: string): void {
