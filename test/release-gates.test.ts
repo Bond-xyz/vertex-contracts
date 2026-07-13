@@ -13,6 +13,7 @@ import {
   assertRuntimeSizeBudget,
   collectReleaseBuildEvidence,
   collectContractCreationEvidence,
+  decodeProductIds,
   deterministicSha256,
   ENDPOINT_RUNTIME_BUDGET_BYTES,
   EIP170_MAX_RUNTIME_BYTES,
@@ -111,6 +112,11 @@ describe('Galileo audited-base release gates', () => {
       originalHardhatManifest = fs.readFileSync(hardhatManifestFile, 'utf8');
       fs.rmSync(hardhatManifestFile);
     }
+  });
+
+  it('decodes product IDs returned as either ABI numbers or BigNumbers', () => {
+    expect(decodeProductIds([2, 4, 6, 8])).to.deep.equal([2, 4, 6, 8]);
+    expect(decodeProductIds([2, 4, 6, 8].map((value) => BigNumber.from(value)))).to.deep.equal([2, 4, 6, 8]);
   });
 
   after(() => {
