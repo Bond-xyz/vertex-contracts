@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Manifest, ManifestData } from '@openzeppelin/upgrades-core';
 import { artifacts, ethers, network as hardhatNetwork, upgrades } from 'hardhat';
-import { BigNumber, Contract, ContractReceipt, ContractTransaction, utils } from 'ethers';
+import { BigNumber, Contract, ContractReceipt, ContractTransaction, utils, Wallet } from 'ethers';
 import {
   GALILEO_CHAIN_ID,
   GALILEO_RELEASE_ID,
@@ -65,6 +65,11 @@ import {
   portableArtifactReference,
   runDurableFinalization,
 } from './galileo-finalization-journal';
+import {
+  assertGalileoDeploymentFeePolicy,
+  GalileoLegacyFeeWallet,
+  resolveGalileoLegacyGasPrice,
+} from './galileo-fee-policy';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const EXPECTED_OPENZEPPELIN_MANIFEST = `.openzeppelin/unknown-${GALILEO_CHAIN_ID}.json`;
@@ -87,8 +92,8 @@ const receipt = async (transaction: ContractTransaction): Promise<ContractReceip
 const deploymentBlock = async (contract: Contract): Promise<number> =>
   (await contract.deployTransaction.wait()).blockNumber;
 
-async function deployProxyShell(name: string, unsafeAllow: 'delegatecall'[] = []): Promise<Contract> {
-  const factory = await ethers.getContractFactory(name);
+async function deployProxyShell(name: string, deployer: Wallet, unsafeAllow: 'delegatecall'[] = []): Promise<Contract> {
+  const factory = await ethers.getContractFactory(name, deployer);
   const proxy = await upgrades.deployProxy(factory, [], {
     initializer: false,
     kind: 'transparent',
@@ -277,13 +282,12 @@ function writeExclusiveJson(file: string, value: unknown): void {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
 }
 
-async function prepareDeployment(files: ReleaseFiles): Promise<void> {
+async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise<void> {
   // Static approval/provenance is verified before the first preparation transaction.
   const preflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
   const quote = await checkedQuote();
   const contractDiff = await collectContractInterfaceDiff();
   const releaseStateHostIdentity = ensureLocalReleaseStateHostIdentity();
-  const [deployer] = await ethers.getSigners();
   const sequencer = requiredAddress(
     process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
     'PERPDEX_SEQUENCER_ADDRESS'
@@ -303,21 +307,21 @@ async function prepareDeployment(files: ReleaseFiles): Promise<void> {
     expectedFirstContractCode: await ethers.provider.getCode(preflight.deploymentIntent.expectedFirstContract),
   });
 
-  const Sanctions = await ethers.getContractFactory('MockSanctionsList');
+  const Sanctions = await ethers.getContractFactory('MockSanctionsList', deployer);
   const sanctions = await Sanctions.deploy({ nonce: preflight.deploymentIntent.firstTransactionNonce });
   if (sanctions.address !== preflight.deploymentIntent.expectedFirstContract) {
     throw new Error('first preparation transaction does not match the approved deployment intent');
   }
   await sanctions.deployed();
-  const Liq = await ethers.getContractFactory('ClearinghouseLiq');
+  const Liq = await ethers.getContractFactory('ClearinghouseLiq', deployer);
   const clearinghouseLiq = await Liq.deploy();
   await clearinghouseLiq.deployed();
-  const verifier = await deployProxyShell('Verifier');
-  const endpoint = await deployProxyShell('Endpoint');
-  const clearinghouse = await deployProxyShell('Clearinghouse', ['delegatecall']);
-  const spotEngine = await deployProxyShell('SpotEngine');
-  const perpEngine = await deployProxyShell('PerpEngine');
-  const offchainExchange = await deployProxyShell('OffchainExchange');
+  const verifier = await deployProxyShell('Verifier', deployer);
+  const endpoint = await deployProxyShell('Endpoint', deployer);
+  const clearinghouse = await deployProxyShell('Clearinghouse', deployer, ['delegatecall']);
+  const spotEngine = await deployProxyShell('SpotEngine', deployer);
+  const perpEngine = await deployProxyShell('PerpEngine', deployer);
+  const offchainExchange = await deployProxyShell('OffchainExchange', deployer);
   const paddedVerifierPoints = normalizeVerifierPublicKeys([
     ...preflight.verifierConfig.keys,
     ...Array.from({ length: 5 }, () => ({ x: 0, y: 0 })),
@@ -336,7 +340,7 @@ async function prepareDeployment(files: ReleaseFiles): Promise<void> {
     preflight.verifierConfig.signerBitmask
   );
 
-  const VirtualBook = await ethers.getContractFactory('VirtualBook');
+  const VirtualBook = await ethers.getContractFactory('VirtualBook', deployer);
   const preparedMarkets: Record<string, unknown> = {};
   for (const product of preflight.products.products) {
     const virtualBook = await VirtualBook.deploy(product.productId);
@@ -629,12 +633,11 @@ function assertPreparedBinding(prepared: PreparedDeployment, preflight: Verified
   }
 }
 
-async function finalizeDeployment(files: ReleaseFiles): Promise<void> {
+async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promise<void> {
   const preflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
   const prepared = JSON.parse(fs.readFileSync(files.preparedFile, 'utf8')) as PreparedDeployment;
   assertPreparedBinding(prepared, preflight);
   const quote = await checkedQuote();
-  const [deployer] = await ethers.getSigners();
   if (
     deployer.address !== prepared.deployer ||
     requiredAddress(process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address, 'PERPDEX_SEQUENCER_ADDRESS') !==
@@ -651,12 +654,16 @@ async function finalizeDeployment(files: ReleaseFiles): Promise<void> {
     throw new Error('OpenZeppelin manifest changed after graph preparation');
   }
 
-  const verifier = await ethers.getContractAt('Verifier', prepared.contracts.verifier.proxy);
-  const endpoint = await ethers.getContractAt('Endpoint', prepared.contracts.endpoint.proxy);
-  const clearinghouse = await ethers.getContractAt('Clearinghouse', prepared.contracts.clearinghouse.proxy);
-  const spotEngine = await ethers.getContractAt('SpotEngine', prepared.contracts.spotEngine.proxy);
-  const perpEngine = await ethers.getContractAt('PerpEngine', prepared.contracts.perpEngine.proxy);
-  const offchainExchange = await ethers.getContractAt('OffchainExchange', prepared.contracts.offchainExchange.proxy);
+  const verifier = await ethers.getContractAt('Verifier', prepared.contracts.verifier.proxy, deployer);
+  const endpoint = await ethers.getContractAt('Endpoint', prepared.contracts.endpoint.proxy, deployer);
+  const clearinghouse = await ethers.getContractAt('Clearinghouse', prepared.contracts.clearinghouse.proxy, deployer);
+  const spotEngine = await ethers.getContractAt('SpotEngine', prepared.contracts.spotEngine.proxy, deployer);
+  const perpEngine = await ethers.getContractAt('PerpEngine', prepared.contracts.perpEngine.proxy, deployer);
+  const offchainExchange = await ethers.getContractAt(
+    'OffchainExchange',
+    prepared.contracts.offchainExchange.proxy,
+    deployer
+  );
   for (const key of [
     'verifier',
     'endpoint',
@@ -1177,8 +1184,21 @@ async function finalizeDeployment(files: ReleaseFiles): Promise<void> {
 async function main(): Promise<void> {
   const phase = process.env.PERPDEX_DEPLOY_PHASE;
   const files = releaseFiles();
-  if (phase === 'prepare') return prepareDeployment(files);
-  if (phase === 'finalize') return finalizeDeployment(files);
+  const configuredGasPriceWei = resolveGalileoLegacyGasPrice();
+  const privateKey = process.env.PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY;
+  if (!privateKey) throw new Error('PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY is required');
+  const deployer = new GalileoLegacyFeeWallet(privateKey, ethers.provider, configuredGasPriceWei);
+  const populatedTransaction = await deployer.populateTransaction({
+    to: deployer.address,
+    value: 0,
+  });
+  await assertGalileoDeploymentFeePolicy({
+    provider: ethers.provider,
+    populatedTransaction,
+    configuredGasPriceWei,
+  });
+  if (phase === 'prepare') return prepareDeployment(files, deployer);
+  if (phase === 'finalize') return finalizeDeployment(files, deployer);
   throw new Error('PERPDEX_DEPLOY_PHASE must be exactly prepare or finalize; one-shot deployment is disabled');
 }
 

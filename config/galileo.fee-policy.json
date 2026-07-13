@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-galileo-legacy-fees",
+  "status": "approved_for_galileo_testnet_release",
+  "chainId": 16602,
+  "transactionType": "legacy",
+  "requiredEnvironmentVariable": "PERPDEX_GALILEO_GAS_PRICE_WEI",
+  "requireExplicitValue": true,
+  "minimumGasPriceWei": "2000000007",
+  "defaultGasPriceWei": "4000000007",
+  "maximumGasPriceWei": "20000000000"
+}
