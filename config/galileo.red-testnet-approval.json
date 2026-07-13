@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "approvalId": "bond-perpdex-galileo-red-testnet-release",
+  "scope": "galileo_testnet_only",
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-galileo-audited-base",
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "approver": {
+    "name": "Red",
+    "role": "product_and_release_owner"
+  },
+  "decision": "approve_exact_galileo_testnet_release",
+  "approvedAt": "2026-07-13T06:19:13Z",
+  "mainnetExternalReviewWaived": false,
+  "candidate": {
+    "releaseCommit": "531ddce8fd78ed7fd1bcd87a40dbef3b8866a379",
+    "sourceTree": "e3e83a09a4c2241c6d3649d0dc1fd898a8f91090",
+    "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
+    "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
+    "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
+    "backendBetaCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "storkPolicySha256": "48a0754ea11410e6f496f66a8786ef685c74e3d05c0e12d4ddf068dfe4b72560",
+    "collateralProvenanceSha256": "1e750f6d2af41e591fa0ff2f099fe80d033cbcd454f57b449ea406098454ba60",
+    "verifierConfigSha256": "c66c78d683188153904bc4f8d19872ad32132d511d45c8f20a3e020d874b4c79",
+    "verifierSignerCount": 3,
+    "verifierSignerBitmask": 7,
+    "deploymentIntentId": "0xcd11155b2eb097dc9de70880c814985a2a2fd39afb35954d613783449a6c849d",
+    "deploymentNonce": "20260713061149",
+    "expiresAt": 1783966309,
+    "deployer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
+    "sequencer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
+    "firstTransactionNonce": 285,
+    "expectedFirstContract": "0xDc3EB7DEe1636a4f9D4e7121807f3C11C9C372eA"
+  },
+  "deterministicCi": {
+    "provider": "github_actions",
+    "repository": "Bond-xyz/vertex-contracts",
+    "workflow": "Galileo deterministic release gate",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29228157497",
+    "headSha": "531ddce8fd78ed7fd1bcd87a40dbef3b8866a379",
+    "conclusion": "success",
+    "checks": [
+      "compile",
+      "contract-interface-diff",
+      "release-tests",
+      "gitleaks"
+    ]
+  },
+  "independentAgentReviews": [
+    {
+      "agent": "Codex /root/verify_phase_b_retention",
+      "reviewedCommit": "531ddce8fd78ed7fd1bcd87a40dbef3b8866a379",
+      "conclusion": "approved",
+      "evidenceSha256": "f40e91a41c77bd099cc1cf606fae3e05c5b1abbff93fd4ce1777f4edead15740",
+      "summary": "Exact merged Galileo fee-policy candidate independently approved: tree-identical to reviewed PR head, exact push CI and 87/87 release tests green, deploy/planner 24+5 binding verified, stale approval absent, pending nonce 285 and all 19 CREATE addresses empty; no broadcast or approval generation performed."
+    }
+  ]
+}
