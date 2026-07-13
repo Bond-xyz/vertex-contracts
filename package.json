@@ -9,7 +9,7 @@
     "compile": "hardhat compile",
     "force-compile": "TS_NODE_TRANSPILE_ONLY=1 hardhat clean && TS_NODE_TRANSPILE_ONLY=1 hardhat compile",
     "test": "TS_NODE_TRANSPILE_ONLY=1 hardhat test --network hardhat",
-    "test:release": "TS_NODE_TRANSPILE_ONLY=1 hardhat test test/release-gates.test.ts test/release-attestation.test.ts test/red-testnet-approval.test.ts test/stork-deployment-packet.test.ts test/galileo-finalization-journal.test.ts test/withdrawal-release-mode.test.ts --network hardhat",
+    "test:release": "TS_NODE_TRANSPILE_ONLY=1 hardhat test test/release-gates.test.ts test/release-attestation.test.ts test/red-testnet-approval.test.ts test/stork-deployment-packet.test.ts test/galileo-finalization-journal.test.ts test/withdrawal-release-mode.test.ts test/galileo-address-plan.test.ts --network hardhat",
     "evidence:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/collect-galileo-review-inputs.ts --network hardhat",
     "diff:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/contract-interface-diff.ts --network hardhat",
     "intent:galileo": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/create-galileo-deployment-intent.ts",
@@ -17,6 +17,7 @@
     "review:galileo:products": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/validate-galileo-product-review.ts",
     "approval:galileo:red": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/create-galileo-red-approval.ts --network hardhat",
     "snapshot:galileo:stork": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/create-galileo-stork-snapshot.ts",
+    "plan:galileo:addresses": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/create-galileo-address-plan.ts",
     "deploy:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/deploy-galileo.ts --network galileo",
     "verify:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/verify-galileo-deployment.ts --network galileo"
   },
@@ -81,5 +82,6 @@
   },
   "lint-staged": {
     "*.{ts,sol}": "yarn lint"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }
