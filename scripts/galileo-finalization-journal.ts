@@ -70,6 +70,13 @@ type FinalizationProvider = Pick<
   | 'waitForTransaction'
 >;
 
+// Endpoint.initialize consumed 449,614 gas and PerpEngine.addProduct consumed
+// 252,728 gas in the failed Galileo attempt. A fixed 1,000,000-gas envelope
+// leaves conservative headroom while avoiding ethers estimating later
+// same-signer transactions against intentionally not-yet-mined prerequisite
+// state. Runtime validation below also requires this to fit the live block.
+export const GALILEO_FINALIZATION_GAS_LIMIT = 1_000_000;
+
 export type FinalizationRunInput = {
   journalFile: string;
   manifestFile: string;
@@ -1332,6 +1339,7 @@ async function reconcileOrBroadcast(
       nonce: step.nonce,
       value: 0,
       data: step.calldata,
+      gasLimit: GALILEO_FINALIZATION_GAS_LIMIT,
     });
     input.testOnlyAfterSendBeforePersist?.(step, sent.hash);
     if (!utils.isHexString(sent.hash, 32)) {
@@ -1374,6 +1382,17 @@ export async function runDurableFinalization(input: FinalizationRunInput): Promi
       throw new Error(
         `finalization journal is terminally abandoned: ${journal.terminal?.outcome || 'unknown outcome'}`
       );
+    }
+
+    if (journal.steps.some((step) => step.state === 'planned')) {
+      const broadcastHeadNumber = await input.provider.getBlockNumber();
+      const broadcastHead = await input.provider.getBlock(broadcastHeadNumber);
+      if (!broadcastHead) throw new Error('Galileo finalization broadcast-head block is unavailable');
+      if (BigNumber.from(broadcastHead.gasLimit).lt(GALILEO_FINALIZATION_GAS_LIMIT)) {
+        throw new Error(
+          `Galileo finalization gas limit ${GALILEO_FINALIZATION_GAS_LIMIT} exceeds live block gas limit ${broadcastHead.gasLimit.toString()}`
+        );
+      }
     }
 
     // Broadcast the exact nonce-ordered packet before waiting on any receipt.
