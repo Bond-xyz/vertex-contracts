@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "approvalId": "bond-perpdex-galileo-red-testnet-release",
+  "scope": "galileo_testnet_only",
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-galileo-audited-base",
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "approver": {
+    "name": "Red",
+    "role": "product_and_release_owner"
+  },
+  "decision": "approve_exact_galileo_testnet_release",
+  "approvedAt": "2026-07-13T05:22:32Z",
+  "mainnetExternalReviewWaived": false,
+  "candidate": {
+    "releaseCommit": "d8e4029cdd3a4143c8aa963d09c3616f2ab26277",
+    "sourceTree": "f59a7c51e6d8c37f50ac36282495ae596fbd01f0",
+    "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
+    "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
+    "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
+    "backendBetaCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "storkPolicySha256": "48a0754ea11410e6f496f66a8786ef685c74e3d05c0e12d4ddf068dfe4b72560",
+    "collateralProvenanceSha256": "1e750f6d2af41e591fa0ff2f099fe80d033cbcd454f57b449ea406098454ba60",
+    "verifierConfigSha256": "c66c78d683188153904bc4f8d19872ad32132d511d45c8f20a3e020d874b4c79",
+    "verifierSignerCount": 3,
+    "verifierSignerBitmask": 7,
+    "deploymentIntentId": "0x39408d352bc49ec4b13ddf93de9cb45e6e61732af8396a36ede176862cf7aef1",
+    "deploymentNonce": "202607130520",
+    "expiresAt": 1783962921,
+    "deployer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
+    "sequencer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
+    "firstTransactionNonce": 284,
+    "expectedFirstContract": "0xf4F3862a234913902355D435eA39BA023885A8FA"
+  },
+  "deterministicCi": {
+    "provider": "github_actions",
+    "repository": "Bond-xyz/vertex-contracts",
+    "workflow": "Galileo deterministic release gate",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29225570594",
+    "headSha": "d8e4029cdd3a4143c8aa963d09c3616f2ab26277",
+    "conclusion": "success",
+    "checks": [
+      "compile",
+      "contract-interface-diff",
+      "release-tests",
+      "gitleaks"
+    ]
+  },
+  "independentAgentReviews": [
+    {
+      "agent": "Codex /root/verify_phase_b_retention/review_exact_contract_release",
+      "reviewedCommit": "d8e4029cdd3a4143c8aa963d09c3616f2ab26277",
+      "conclusion": "approved",
+      "evidenceSha256": "a37961a06058e62527e0d6a01571b64be35617c2b1901eef7818ffb4730b0b6c",
+      "summary": "Exact merge commit, deterministic CI, 80/80 release tests, backend artifact binding, collateral pin, verifier quorum, nonce plan, and 19 empty CREATE addresses independently verified; dynamic deployment and fresh Stork evidence remain required."
+    }
+  ]
+}
