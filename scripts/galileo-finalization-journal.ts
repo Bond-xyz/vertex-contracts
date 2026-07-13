@@ -1260,6 +1260,9 @@ async function reconcileOrBroadcast(
       input.provider.getTransactionCount(step.from, 'pending'),
     ]);
   }
+  if (latestNonce === undefined || pendingNonce === undefined) {
+    throw new Error(`${step.id} account nonce query returned no canonical value`);
+  }
   if (latestNonce > step.nonce || pendingNonce > step.nonce) {
     return abandon(
       input.journalFile,
@@ -1268,7 +1271,21 @@ async function reconcileOrBroadcast(
       'signer nonce was consumed but exact transaction is unavailable'
     );
   }
-  if (latestNonce < step.nonce || pendingNonce < step.nonce) {
+  const pendingPrefix = journal.steps.filter(
+    (candidate) => candidate.nonce >= latestNonce && candidate.nonce < step.nonce
+  );
+  const durablePendingPrefix =
+    pendingPrefix.length === step.nonce - latestNonce &&
+    pendingPrefix.every(
+      (candidate, index) =>
+        candidate.nonce === latestNonce + index &&
+        ['broadcast', 'confirmed', 'finalized'].includes(candidate.state) &&
+        candidate.attemptHashes.length === 1
+    );
+  if (
+    pendingNonce < step.nonce ||
+    (latestNonce < step.nonce && (pendingNonce !== step.nonce || !durablePendingPrefix))
+  ) {
     return abandon(input.journalFile, journal, step.id, 'signer nonce has a gap before the planned transaction');
   }
 
@@ -1359,14 +1376,24 @@ export async function runDurableFinalization(input: FinalizationRunInput): Promi
       );
     }
 
+    // Broadcast the exact nonce-ordered packet before waiting on any receipt.
+    // The same-signer nonce sequence preserves execution order while keeping
+    // every price write inside one short signed-Stork freshness window.
+    const transactionHashes = new Map<string, string>();
+    for (const step of journal.steps) {
+      const transactionHash =
+        step.state === 'confirmed' || step.state === 'finalized'
+          ? step.receipt!.transactionHash
+          : await reconcileOrBroadcast(input, journal, step);
+      transactionHashes.set(step.id, transactionHash);
+    }
+
+    // Only after all five sends are durably journaled do we reconcile their
+    // exact receipts and verify the canonical state transition prefix.
     for (const step of journal.steps) {
       const wasFinalized = step.state === 'finalized';
-      let transactionHash: string;
-      if (step.state === 'confirmed' || step.state === 'finalized') {
-        transactionHash = step.receipt!.transactionHash;
-      } else {
-        transactionHash = await reconcileOrBroadcast(input, journal, step);
-      }
+      const transactionHash = transactionHashes.get(step.id);
+      if (!transactionHash) throw new Error(`${step.id} has no durable transaction hash after broadcast pass`);
 
       let confirmed: Awaited<ReturnType<typeof exactReceipt>>;
       try {

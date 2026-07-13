@@ -61,6 +61,8 @@ class FakeChain {
   blockScanCount = 0;
   sentNonces: number[] = [];
   sendDelayMs = 0;
+  holdLatestNonceOnSend = false;
+  firstReceiptReadAfterSendCount: number | undefined;
   revertNext = false;
   transactions = new Map<string, providers.TransactionResponse>();
   receipts = new Map<string, providers.TransactionReceipt>();
@@ -134,7 +136,7 @@ class FakeChain {
     this.transactions.set(hash, transaction);
     this.receipts.set(hash, receipt);
     this.blocks.set(block.number, block);
-    this.latestNonce = nonce + 1;
+    if (!this.holdLatestNonceOnSend) this.latestNonce = nonce + 1;
     this.pendingNonce = nonce + 1;
     return transaction;
   }
@@ -147,7 +149,10 @@ class FakeChain {
         return this.blocks.get(number)!;
       },
       getTransaction: async (hash: string) => this.transactions.get(hash) || null,
-      getTransactionReceipt: async (hash: string) => this.receipts.get(hash) || null,
+      getTransactionReceipt: async (hash: string) => {
+        this.firstReceiptReadAfterSendCount ??= this.sendCount;
+        return this.receipts.get(hash) || null;
+      },
       getTransactionCount: async (_address: string, tag: string) =>
         tag === 'pending' ? this.pendingNonce : this.latestNonce,
       getBlock: async (number: number) => this.blocks.get(number) || null,
@@ -218,12 +223,18 @@ describe('durable Galileo finalization journal', () => {
     expected = { ...expected, preparationBoundaryBlockHash: utils.hexlify(utils.randomBytes(32)) };
   };
 
-  it('reserves before mutation and broadcasts one gap-free nonce only after the prior receipt is verified', async () => {
+  it('durably broadcasts all five gap-free nonces before the first receipt read or verification', async () => {
     const verified: string[] = [];
+    const freshnessChecks: string[] = [];
+    chain.holdLatestNonceOnSend = true;
     const journal = await run({
+      assertFreshBeforeBroadcast: (step) => {
+        expect(chain.firstReceiptReadAfterSendCount).to.equal(undefined);
+        freshnessChecks.push(step.id);
+      },
       verifyConfirmedStep: async (step) => {
         if (!verified.includes(step.id)) {
-          expect(chain.sendCount).to.equal(verified.length + 1);
+          expect(chain.sendCount).to.equal(5);
           verified.push(step.id);
         }
       },
@@ -232,8 +243,10 @@ describe('durable Galileo finalization journal', () => {
     expect(journal.steps.every((step) => step.state === 'finalized')).to.equal(true);
     expect(journal.steps.every((step) => step.finality!.confirmationsObserved >= 12)).to.equal(true);
     expect(journal.steps.map((step) => step.nonce)).to.deep.equal([7, 8, 9, 10, 11]);
+    expect(freshnessChecks).to.deep.equal(expected.steps.map((step) => step.id));
     expect(verified).to.deep.equal(expected.steps.map((step) => step.id));
     expect(chain.sendCount).to.equal(5);
+    expect(chain.firstReceiptReadAfterSendCount).to.equal(5);
     expect(fs.statSync(journalFile).mode & 0o777).to.equal(0o600);
   });
 
@@ -877,9 +890,9 @@ describe('durable Galileo finalization journal', () => {
     const terminal = JSON.parse(fs.readFileSync(journalFile, 'utf8'));
     expect(terminal.status).to.equal('abandoned');
     expect(terminal.terminal.outcome).to.equal('transaction reverted');
-    expect(chain.sendCount).to.equal(1);
+    expect(chain.sendCount).to.equal(5);
     await expect(run()).to.be.rejectedWith('terminally abandoned');
-    expect(chain.sendCount).to.equal(1);
+    expect(chain.sendCount).to.equal(5);
   });
 
   it('fails closed on tampered calldata, a consumed nonce, stale receipt evidence, and a reorg', async () => {
@@ -907,7 +920,7 @@ describe('durable Galileo finalization journal', () => {
         },
       })
     ).to.be.rejectedWith('signed price stale at receipt block');
-    expect(chain.sendCount).to.equal(1);
+    expect(chain.sendCount).to.equal(5);
 
     fs.rmSync(journalFile);
     rotateBoundary();
