@@ -63,6 +63,17 @@ function requireLowerSha256(value: unknown, label: string): string {
   return value;
 }
 
+function requireSecondsUtcTimestamp(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) {
+    throw new Error(`${label} must be a seconds-only UTC timestamp`);
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed) || new Date(parsed).toISOString() !== value.replace(/Z$/, '.000Z')) {
+    throw new Error(`${label} must be a valid seconds-only UTC timestamp`);
+  }
+  return value;
+}
+
 /**
  * Validate the exact tracked policy consumed by the clean-v1 GCP publisher.
  * Phase-B evidence.json is deliberately not accepted as a substitute: the
@@ -121,13 +132,11 @@ export function validateGalileoBackendArtifactPolicy(value: unknown): void {
   );
   if (
     approval.decision !== GALILEO_BACKEND_ARTIFACT_POLICY_APPROVAL ||
-    approval.reviewer !== GALILEO_BACKEND_ARTIFACT_POLICY_REVIEWER ||
-    typeof approval.reviewedAt !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(approval.reviewedAt) ||
-    Number.isNaN(Date.parse(approval.reviewedAt))
+    approval.reviewer !== GALILEO_BACKEND_ARTIFACT_POLICY_REVIEWER
   ) {
     throw new Error('backend artifact policy lacks the exact reviewer approval');
   }
+  requireSecondsUtcTimestamp(approval.reviewedAt, 'backend artifact policy approval reviewedAt');
 
   const services = requireExactKeys(policy.services, GALILEO_BACKEND_SERVICES, 'backend artifact policy services');
   for (const service of GALILEO_BACKEND_SERVICES) {

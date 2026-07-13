@@ -152,6 +152,24 @@ describe('Galileo backend runtime binding', () => {
     );
   });
 
+  it('rejects approval timestamps with milliseconds', () => {
+    const policy = approvedPolicy();
+    (policy.approval as Record<string, unknown>).reviewedAt = '2026-07-12T23:30:00.123Z';
+    const { root, file, sha256 } = fixture(policy);
+    expect(() => bindGalileoBackendRuntime(input(root, file, sha256))).to.throw(
+      'reviewedAt must be a seconds-only UTC timestamp'
+    );
+  });
+
+  it('rejects normalized but impossible calendar timestamps', () => {
+    const policy = approvedPolicy();
+    (policy.approval as Record<string, unknown>).reviewedAt = '2026-02-30T23:30:00Z';
+    const { root, file, sha256 } = fixture(policy);
+    expect(() => bindGalileoBackendRuntime(input(root, file, sha256))).to.throw(
+      'reviewedAt must be a valid seconds-only UTC timestamp'
+    );
+  });
+
   it('rejects any other runtime source argument without changing either release policy', () => {
     const { root, file, sha256 } = fixture();
     const storkFile = path.join(root, 'config/galileo.stork-deployment-policy.json');
