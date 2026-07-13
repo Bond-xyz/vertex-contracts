@@ -19,29 +19,40 @@ corepack yarn test:release
 The checkout must be clean. CI and an independent review must refer to the
 same final candidate commit later recorded in the Red approval artifact.
 
-## 2. Bind the retained backend artifact before activating release policy
+## 2. Bind the approved tracked backend artifact policy before activating release policy
 
 The runtime source is exact commit
-`4d479bd167d4cc98dce373af214a5d109b9cad33`. Obtain the immutable retained
-Linux artifact manifest as a local read-only file and independently review its
-SHA-256. Do not type a guessed hash.
+`4d479bd167d4cc98dce373af214a5d109b9cad33`. From the separately reviewed
+clean-v1 backend control checkout, use the tracked
+`infra/gcp/parallel-cleanroom/testnet-publisher-artifact-policy.json` only after
+it is approved and contains the five exact Linux-amd64 artifact hashes. Do not
+substitute the Phase-B `evidence.json`: it describes retention results and is
+not the reviewed artifact allowlist. Independently review the exact tracked
+policy file SHA-256; do not type a guessed hash.
 
 ```bash
 export PERPDEX_BACKEND_RUNTIME_SOURCE_COMMIT=4d479bd167d4cc98dce373af214a5d109b9cad33
-export PERPDEX_BACKEND_ARTIFACT_MANIFEST_FILE=/absolute/path/to/reviewed-retained-artifact-manifest.json
-export PERPDEX_REVIEWED_BACKEND_ARTIFACT_MANIFEST_SHA256=<exact-sha-from-separate-artifact-review>
-test "$(shasum -a 256 "$PERPDEX_BACKEND_ARTIFACT_MANIFEST_FILE" | awk '{print $1}')" = \
-  "$PERPDEX_REVIEWED_BACKEND_ARTIFACT_MANIFEST_SHA256"
+export PERPDEX_BACKEND_CONTROL_CHECKOUT=/absolute/path/to/separately-reviewed-clean-v1-backend-checkout
+export PERPDEX_BACKEND_ARTIFACT_POLICY_RELATIVE=infra/gcp/parallel-cleanroom/testnet-publisher-artifact-policy.json
+export PERPDEX_BACKEND_ARTIFACT_POLICY_FILE="$PERPDEX_BACKEND_CONTROL_CHECKOUT/$PERPDEX_BACKEND_ARTIFACT_POLICY_RELATIVE"
+export PERPDEX_REVIEWED_BACKEND_ARTIFACT_POLICY_SHA256=<exact-sha-from-separate-policy-review>
+git -C "$PERPDEX_BACKEND_CONTROL_CHECKOUT" ls-files --error-unmatch \
+  "$PERPDEX_BACKEND_ARTIFACT_POLICY_RELATIVE"
+test "$(shasum -a 256 "$PERPDEX_BACKEND_ARTIFACT_POLICY_FILE" | awk '{print $1}')" = \
+  "$PERPDEX_REVIEWED_BACKEND_ARTIFACT_POLICY_SHA256"
 corepack yarn bind:galileo:backend
 git diff -- config/galileo.stork-deployment-policy.json config/galileo.release-policy.json
 ```
 
 The command refuses any other backend commit, a hash that does not match the
-manifest bytes, partial prior bindings, or a dirty tracked checkout. It writes
-the immutable runtime binding first and activates the testnet policy second,
-so an interrupted run remains fail-closed. Review and commit only those two
-policy changes, then obtain green deterministic CI and independent review for
-that exact commit.
+exact policy bytes, a Phase-B evidence document, a pending/unapproved policy,
+source/target drift, an incomplete five-service allowlist, an unpinned builder,
+incorrect reviewer/retention authorization, partial prior bindings, or a dirty
+tracked checkout. It hashes and binds the exact approved policy file bytes,
+writes the immutable runtime binding first, and activates the testnet policy
+second, so an interrupted run remains fail-closed. Review and commit only those
+two policy changes, then obtain green deterministic CI and independent review
+for that exact commit.
 
 ## 3. Prepare public verifier and unsigned nonce evidence
 
