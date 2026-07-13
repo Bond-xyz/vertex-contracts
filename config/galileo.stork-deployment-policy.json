@@ -8,9 +8,9 @@
     "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
     "releaseCommitRole": "reviewed_protocol_baseline_only",
     "runtimeRelease": {
-      "sourceCommit": null,
-      "artifactManifestSha256": null,
-      "status": "pending_final_immutable_backend_release"
+      "sourceCommit": "4d479bd167d4cc98dce373af214a5d109b9cad33",
+      "artifactManifestSha256": "0dd777b345e85155aed5e1c735f21c5d1a445d0f78ccf98dcc427b3a5d908ec2",
+      "status": "reviewed_immutable_backend_release"
     },
     "storkBehaviorCommit": "6576efbbfaa74a0babe442be1f8aa029912893f2",
     "verifierSourceFile": "services/price-oracle/src/stork.rs",

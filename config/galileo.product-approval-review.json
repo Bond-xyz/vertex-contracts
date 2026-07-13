@@ -27,7 +27,7 @@
   "initialPricePolicy": {
     "source": "verified_stork_deployment_snapshot",
     "policyFile": "config/galileo.stork-deployment-policy.json",
-    "policySha256": "27ffb1b1766a29e054bcc98dcc5238c1feff090eb07cd98b8e85d0dec4feefcf",
+    "policySha256": "48a0754ea11410e6f496f66a8786ef685c74e3d05c0e12d4ddf068dfe4b72560",
     "staticPriceAllowed": false,
     "snapshotTracked": false,
     "graphPreparationRequiresSnapshot": false,
