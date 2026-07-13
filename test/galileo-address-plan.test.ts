@@ -10,6 +10,8 @@ import {
   GALILEO_FINALIZE_TRANSACTION_COUNT,
   GALILEO_PREPARE_TRANSACTION_COUNT,
 } from '../scripts/create-galileo-address-plan';
+import { runtimeCodeHash } from '../scripts/release-evidence';
+import { isCanonicalGalileoRuntimeCodeHash } from '../scripts/galileo-runtime-hash';
 
 describe('unsigned Galileo CREATE/address plan', () => {
   const deployer = '0xbD58414C999391F610B11F0a4BFc0037543A0e76';
@@ -29,7 +31,7 @@ describe('unsigned Galileo CREATE/address plan', () => {
 
   it('allows address planning only for the exact reviewed fee-policy deployment script', () => {
     expect(GALILEO_DEPLOYMENT_SCRIPT_SHA256).to.equal(
-      '6f3dc51ad5b5d67b8ff75495517f19f05ce0bef927559a2563dc8d9f5d7b5b32'
+      '99dba0b0bc60b36b5ca10b5d9f46f68370e24e347806ab3c75d0c751bbaba5c3'
     );
     expect(() => assertGalileoDeploymentScriptMatchesPlan()).not.to.throw();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-fee-plan-'));
@@ -41,6 +43,15 @@ describe('unsigned Galileo CREATE/address plan', () => {
     expect(() => assertGalileoDeploymentScriptMatchesPlan(mutatedScript)).to.throw(
       'deployment script changed; rederive and review the transaction-offset plan'
     );
+  });
+
+  it('accepts the canonical production runtime hash without normalizing its evidence', () => {
+    const productionRuntimeHash = runtimeCodeHash('0x60006000');
+    expect(productionRuntimeHash).to.match(/^0x[0-9a-f]{64}$/);
+    expect(isCanonicalGalileoRuntimeCodeHash(productionRuntimeHash)).to.equal(true);
+    expect(isCanonicalGalileoRuntimeCodeHash(productionRuntimeHash.slice(2))).to.equal(false);
+    expect(isCanonicalGalileoRuntimeCodeHash(`0x${'11'.repeat(31)}`)).to.equal(false);
+    expect(isCanonicalGalileoRuntimeCodeHash(`0x${'11'.repeat(33)}`)).to.equal(false);
   });
 
   it('pins the reviewed CREATE offsets and call targets', () => {

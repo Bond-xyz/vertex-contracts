@@ -70,6 +70,7 @@ import {
   GalileoLegacyFeeWallet,
   resolveGalileoLegacyGasPrice,
 } from './galileo-fee-policy';
+import { isCanonicalGalileoRuntimeCodeHash } from './galileo-runtime-hash';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
 const EXPECTED_OPENZEPPELIN_MANIFEST = `.openzeppelin/unknown-${GALILEO_CHAIN_ID}.json`;
@@ -554,7 +555,7 @@ function assertPreparedBinding(prepared: PreparedDeployment, preflight: Verified
         !utils.isAddress(market.virtualBook) ||
         utils.getAddress(market.virtualBook) === ethers.constants.AddressZero ||
         market.artifactKey !== 'virtualBook' ||
-        !/^[0-9a-f]{64}$/i.test(market.runtimeCodeHash || '') ||
+        !isCanonicalGalileoRuntimeCodeHash(market.runtimeCodeHash) ||
         !exactNumber(market.sizeIncrementX18, product.sizeIncrementX18) ||
         !exactNumber(market.minSizeX18, product.minSizeX18) ||
         !exactNumber(market.lpSpreadX18, product.lpSpreadX18) ||
