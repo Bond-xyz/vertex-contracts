@@ -1193,11 +1193,29 @@ async function reconcileOrBroadcast(
     if (transaction || receipt) return recorded;
   }
 
+  let latestNonce: number | undefined;
+  let pendingNonce: number | undefined;
+  if (!hadPriorBroadcastBoundary) {
+    [latestNonce, pendingNonce] = await Promise.all([
+      input.provider.getTransactionCount(step.from, 'latest'),
+      input.provider.getTransactionCount(step.from, 'pending'),
+    ]);
+  }
+
+  // An untouched step with both canonical and pending account nonces exactly at
+  // its planned nonce cannot already have a canonical transaction. Account
+  // nonces are monotonic, so rescanning the preparation boundary is neither
+  // necessary nor useful on this pristine path. Recovery and any observed nonce
+  // advance still require the bounded canonical-history proof below.
+  const observedNonceAdvance =
+    latestNonce !== undefined && pendingNonce !== undefined && (latestNonce > step.nonce || pendingNonce > step.nonce);
   let discovered: providers.TransactionResponse | undefined;
-  try {
-    discovered = await findTransactionByNonce(input.provider, journal, step);
-  } catch (error) {
-    return abandon(input.journalFile, journal, step.id, (error as Error).message);
+  if (hadPriorBroadcastBoundary || observedNonceAdvance) {
+    try {
+      discovered = await findTransactionByNonce(input.provider, journal, step);
+    } catch (error) {
+      return abandon(input.journalFile, journal, step.id, (error as Error).message);
+    }
   }
   if (discovered) {
     if (!transactionMatchesPlan(discovered, step)) {
@@ -1236,10 +1254,12 @@ async function reconcileOrBroadcast(
     );
   }
 
-  const [latestNonce, pendingNonce] = await Promise.all([
-    input.provider.getTransactionCount(step.from, 'latest'),
-    input.provider.getTransactionCount(step.from, 'pending'),
-  ]);
+  if (latestNonce === undefined || pendingNonce === undefined) {
+    [latestNonce, pendingNonce] = await Promise.all([
+      input.provider.getTransactionCount(step.from, 'latest'),
+      input.provider.getTransactionCount(step.from, 'pending'),
+    ]);
+  }
   if (latestNonce > step.nonce || pendingNonce > step.nonce) {
     return abandon(
       input.journalFile,
