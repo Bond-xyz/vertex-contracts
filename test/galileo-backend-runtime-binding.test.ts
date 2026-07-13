@@ -10,6 +10,7 @@ import {
   GALILEO_BACKEND_RUNTIME_SOURCE_ARCHIVE_SHA256,
   GALILEO_BACKEND_RUNTIME_SOURCE_COMMIT,
   GALILEO_BACKEND_RUNTIME_SOURCE_TREE,
+  PENDING_RELEASE_STATUS,
 } from '../scripts/bind-galileo-backend-runtime';
 
 const sourceRoot = path.resolve(__dirname, '..');
@@ -61,9 +62,36 @@ function writePolicy(root: string, policy: unknown, name = 'testnet-publisher-ar
 function fixture(policy: unknown = approvedPolicy(), name?: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-runtime-binding-'));
   fs.mkdirSync(path.join(root, 'config'));
-  for (const configName of ['galileo.stork-deployment-policy.json', 'galileo.release-policy.json']) {
+  for (const configName of [
+    'galileo.stork-deployment-policy.json',
+    'galileo.product-approval-review.json',
+    'galileo.release-policy.json',
+  ]) {
     fs.copyFileSync(path.join(sourceRoot, 'config', configName), path.join(root, 'config', configName));
   }
+  const storkPolicyFile = path.join(root, 'config/galileo.stork-deployment-policy.json');
+  const storkPolicy = JSON.parse(fs.readFileSync(storkPolicyFile, 'utf8'));
+  storkPolicy.backend.runtimeRelease = {
+    sourceCommit: null,
+    artifactManifestSha256: null,
+    status: 'pending_final_immutable_backend_release',
+  };
+  fs.writeFileSync(storkPolicyFile, `${JSON.stringify(storkPolicy, null, 2)}\n`);
+
+  const productReviewFile = path.join(root, 'config/galileo.product-approval-review.json');
+  const productReview = JSON.parse(fs.readFileSync(productReviewFile, 'utf8'));
+  productReview.initialPricePolicy.policySha256 = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(storkPolicyFile))
+    .digest('hex');
+  fs.writeFileSync(productReviewFile, `${JSON.stringify(productReview, null, 2)}\n`);
+
+  const releasePolicyFile = path.join(root, 'config/galileo.release-policy.json');
+  const releasePolicy = JSON.parse(fs.readFileSync(releasePolicyFile, 'utf8'));
+  releasePolicy.policyVersion = 3;
+  releasePolicy.status = PENDING_RELEASE_STATUS;
+  fs.writeFileSync(releasePolicyFile, `${JSON.stringify(releasePolicy, null, 2)}\n`);
+
   const artifactPolicy = writePolicy(root, policy, name);
   return { root, ...artifactPolicy };
 }
@@ -91,6 +119,15 @@ describe('Galileo backend runtime binding', () => {
     const release = JSON.parse(fs.readFileSync(path.join(root, 'config/galileo.release-policy.json'), 'utf8'));
     expect(release.policyVersion).to.equal(4);
     expect(release.status).to.equal(ACTIVE_RELEASE_STATUS);
+    const storkPolicySha256 = crypto
+      .createHash('sha256')
+      .update(fs.readFileSync(path.join(root, 'config/galileo.stork-deployment-policy.json')))
+      .digest('hex');
+    const productReview = JSON.parse(
+      fs.readFileSync(path.join(root, 'config/galileo.product-approval-review.json'), 'utf8')
+    );
+    expect(productReview.initialPricePolicy.policySha256).to.equal(storkPolicySha256);
+    expect(result.storkPolicySha256).to.equal(storkPolicySha256);
   });
 
   it('rejects Phase-B evidence.json even when its byte hash is supplied', () => {
@@ -193,6 +230,51 @@ describe('Galileo backend runtime binding', () => {
       'artifact policy bytes do not match'
     );
     expect(fs.readFileSync(storkFile).equals(before)).to.equal(true);
+  });
+
+  it('rejects product-review Stork policy drift before changing any release file', () => {
+    const { root, file, sha256 } = fixture();
+    const storkFile = path.join(root, 'config/galileo.stork-deployment-policy.json');
+    const productReviewFile = path.join(root, 'config/galileo.product-approval-review.json');
+    const releaseFile = path.join(root, 'config/galileo.release-policy.json');
+    const productReview = JSON.parse(fs.readFileSync(productReviewFile, 'utf8'));
+    productReview.initialPricePolicy.policySha256 = 'ab'.repeat(32);
+    fs.writeFileSync(productReviewFile, `${JSON.stringify(productReview, null, 2)}\n`);
+    const before = [fs.readFileSync(storkFile), fs.readFileSync(productReviewFile), fs.readFileSync(releaseFile)];
+    expect(() => bindGalileoBackendRuntime(input(root, file, sha256))).to.throw(
+      'product review does not bind the exact pending Stork policy bytes'
+    );
+    expect(fs.readFileSync(storkFile).equals(before[0])).to.equal(true);
+    expect(fs.readFileSync(productReviewFile).equals(before[1])).to.equal(true);
+    expect(fs.readFileSync(releaseFile).equals(before[2])).to.equal(true);
+  });
+
+  it('recovers an interrupted bind while keeping release activation last', () => {
+    const { root, file, sha256 } = fixture();
+    const storkFile = path.join(root, 'config/galileo.stork-deployment-policy.json');
+    const productReviewFile = path.join(root, 'config/galileo.product-approval-review.json');
+    const releaseFile = path.join(root, 'config/galileo.release-policy.json');
+    const stork = JSON.parse(fs.readFileSync(storkFile, 'utf8'));
+    stork.backend.runtimeRelease = {
+      sourceCommit: GALILEO_BACKEND_RUNTIME_SOURCE_COMMIT,
+      artifactManifestSha256: sha256,
+      status: 'reviewed_immutable_backend_release',
+    };
+    fs.writeFileSync(storkFile, `${JSON.stringify(stork, null, 2)}\n`);
+
+    const releaseBefore = JSON.parse(fs.readFileSync(releaseFile, 'utf8'));
+    expect(releaseBefore.status).to.equal(PENDING_RELEASE_STATUS);
+    const productReviewBefore = JSON.parse(fs.readFileSync(productReviewFile, 'utf8'));
+    expect(productReviewBefore.initialPricePolicy.policySha256).not.to.equal(
+      crypto.createHash('sha256').update(fs.readFileSync(storkFile)).digest('hex')
+    );
+
+    const result = bindGalileoBackendRuntime(input(root, file, sha256));
+    const productReviewAfter = JSON.parse(fs.readFileSync(productReviewFile, 'utf8'));
+    expect(productReviewAfter.initialPricePolicy.policySha256).to.equal(result.storkPolicySha256);
+    const releaseAfter = JSON.parse(fs.readFileSync(releaseFile, 'utf8'));
+    expect(releaseAfter.policyVersion).to.equal(4);
+    expect(releaseAfter.status).to.equal(ACTIVE_RELEASE_STATUS);
   });
 
   it('is idempotent for the same policy bytes and refuses a different approved policy', () => {
