@@ -20,7 +20,6 @@ import {
   validateStorkDeploymentSnapshot,
   verifyStorkSignedFeed,
 } from '../scripts/stork-deployment-snapshot';
-import { createTrackedGalileoDeploymentIntent } from '../scripts/create-galileo-deployment-intent';
 import {
   GALILEO_CONTRACT_PACKET_BASE_COMMIT,
   GALILEO_CONTRACT_PACKET_BASE_TREE,
@@ -56,7 +55,7 @@ const OFFICIAL_BTC_PROOF = {
 };
 
 describe('Galileo signed Stork deployment packet', () => {
-  it('keeps provider, nonce, transaction, and intent actions unreachable for every Stork preflight failure class', async () => {
+  it('keeps provider and transaction actions unreachable for every Stork preflight failure class', async () => {
     let providerOrTransactionCalls = 0;
     const action = async () => {
       providerOrTransactionCalls += 1;
@@ -67,7 +66,7 @@ describe('Galileo signed Stork deployment packet', () => {
     } catch (caught) {
       error = caught;
     }
-    expect((error as Error).message).to.contain('final immutable backend artifact/source binding is unresolved');
+    expect((error as Error).message).to.contain('fresh signed Stork deployment snapshot is unavailable');
 
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-stork-preflight-'));
     fs.mkdirSync(path.join(temporaryRoot, 'config'));
@@ -80,6 +79,11 @@ describe('Galileo signed Stork deployment packet', () => {
       decision: APPROVED_STORK_COHERENCE_DECISION,
     };
     policy.status = APPROVED_STORK_DEPLOYMENT_POLICY_STATUS;
+    policy.backend.runtimeRelease = {
+      sourceCommit: null,
+      artifactManifestSha256: null,
+      status: 'pending_final_immutable_backend_release',
+    };
     fs.writeFileSync(
       path.join(temporaryRoot, 'config', 'galileo.stork-deployment-policy.json'),
       JSON.stringify(policy)
@@ -154,9 +158,6 @@ describe('Galileo signed Stork deployment packet', () => {
     expect((error as Error).message).to.contain('stale');
     expect(providerOrTransactionCalls).to.equal(0);
 
-    expect(() => createTrackedGalileoDeploymentIntent()).to.throw(
-      'final immutable backend artifact/source binding is unresolved'
-    );
     const deploySource = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'deploy-galileo.ts'), 'utf8');
     expect(deploySource.indexOf('const preflight = await collectAndVerifyRedTestnetReleaseEvidence')).to.be.lessThan(
       deploySource.indexOf('Sanctions.deploy(')
@@ -183,15 +184,15 @@ describe('Galileo signed Stork deployment packet', () => {
     ).to.be.lessThan(packetCreatorSource.indexOf('fs.writeFileSync(outputFile'));
   });
 
-  it('pins the reviewed protocol baseline and Red-approved spread while leaving the runtime artifact unresolved', () => {
+  it('pins the reviewed protocol baseline, exact runtime release, and Red-approved spread', () => {
     const { policy } = loadTrackedStorkDeploymentPolicy();
     expect(policy.backend.repository).to.equal('Bond-xyz/perpdex-rust-backend');
     expect(policy.backend.releaseCommit).to.equal(BACKEND_PROTOCOL_BASELINE_COMMIT);
     expect(policy.backend.releaseCommitRole).to.equal('reviewed_protocol_baseline_only');
     expect(policy.backend.runtimeRelease).to.deep.equal({
-      sourceCommit: null,
-      artifactManifestSha256: null,
-      status: 'pending_final_immutable_backend_release',
+      sourceCommit: '4d479bd167d4cc98dce373af214a5d109b9cad33',
+      artifactManifestSha256: '0dd777b345e85155aed5e1c735f21c5d1a445d0f78ccf98dcc427b3a5d908ec2',
+      status: 'reviewed_immutable_backend_release',
     });
     expect(() =>
       validateStorkDeploymentSnapshot(

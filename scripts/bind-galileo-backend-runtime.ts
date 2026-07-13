@@ -20,6 +20,9 @@ const GALILEO_BACKEND_ARTIFACT_POLICY_APPROVAL = 'approve_exact_linux_amd64_arti
 const GALILEO_BACKEND_ARTIFACT_POLICY_REVIEWER = 'spyda600';
 const GALILEO_BACKEND_RETENTION_AUTHORIZATION = 'post_money_path_source_hashes_reviewed_for_non_committed_retention';
 const GALILEO_BACKEND_SERVICES = ['market-data', 'mm-bot', 'price-oracle', 'settlement', 'trading'] as const;
+const GALILEO_PRODUCT_REVIEW_ID = 'bond-perpdex-galileo-product-vectors';
+const GALILEO_STORK_POLICY_FILE = 'config/galileo.stork-deployment-policy.json';
+const GALILEO_PRODUCT_REVIEW_FILE = 'config/galileo.product-approval-review.json';
 
 type BindInput = {
   repoRoot: string;
@@ -162,10 +165,51 @@ function writeJson(file: string, value: unknown): void {
   fs.renameSync(temporary, file);
 }
 
+function jsonSha256(value: unknown): string {
+  return crypto
+    .createHash('sha256')
+    .update(`${JSON.stringify(value, null, 2)}\n`)
+    .digest('hex');
+}
+
+function productReviewStorkPolicy(review: unknown): JsonRecord {
+  const root = isRecord(review) ? review : {};
+  if (root.schemaVersion !== 3 || root.reviewId !== GALILEO_PRODUCT_REVIEW_ID || root.chainId !== 16602) {
+    throw new Error('Galileo product review identity mismatch during backend binding');
+  }
+  const initialPricePolicy = requireExactKeys(
+    root.initialPricePolicy,
+    [
+      'graphPreparationRequiresSnapshot',
+      'policyFile',
+      'policySha256',
+      'snapshotRequiredBeforeFirstPriceBearingTransaction',
+      'snapshotTracked',
+      'source',
+      'staticPriceAllowed',
+    ],
+    'Galileo product review initialPricePolicy'
+  );
+  if (
+    initialPricePolicy.source !== 'verified_stork_deployment_snapshot' ||
+    initialPricePolicy.policyFile !== GALILEO_STORK_POLICY_FILE ||
+    initialPricePolicy.staticPriceAllowed !== false ||
+    initialPricePolicy.snapshotTracked !== false ||
+    initialPricePolicy.graphPreparationRequiresSnapshot !== false ||
+    initialPricePolicy.snapshotRequiredBeforeFirstPriceBearingTransaction !== true
+  ) {
+    throw new Error('Galileo product review initial-price policy is not the exact reviewed Stork policy');
+  }
+  requireLowerSha256(initialPricePolicy.policySha256, 'Galileo product review Stork policy SHA-256');
+  return initialPricePolicy;
+}
+
 export function bindGalileoBackendRuntime(input: BindInput): {
   sourceCommit: string;
   artifactPolicySha256: string;
+  storkPolicySha256: string;
   storkPolicyFile: string;
+  productReviewFile: string;
   releasePolicyFile: string;
 } {
   const repoRoot = path.resolve(input.repoRoot);
@@ -193,9 +237,14 @@ export function bindGalileoBackendRuntime(input: BindInput): {
   }
   validateGalileoBackendArtifactPolicy(artifactPolicy);
 
-  const storkPolicyFile = path.join(repoRoot, 'config/galileo.stork-deployment-policy.json');
+  const storkPolicyFile = path.join(repoRoot, GALILEO_STORK_POLICY_FILE);
+  const productReviewFile = path.join(repoRoot, GALILEO_PRODUCT_REVIEW_FILE);
   const releasePolicyFile = path.join(repoRoot, 'config/galileo.release-policy.json');
   const storkPolicy = validateStorkDeploymentPolicy(readJson<StorkDeploymentPolicy>(storkPolicyFile));
+  const currentStorkPolicySha256 = crypto.createHash('sha256').update(fs.readFileSync(storkPolicyFile)).digest('hex');
+  const productReview = readJson<JsonRecord>(productReviewFile);
+  const initialPricePolicy = productReviewStorkPolicy(productReview);
+  const productReviewPolicySha256 = initialPricePolicy.policySha256 as string;
   const releasePolicy = validateReleasePolicy(readJson<GalileoReleasePolicy>(releasePolicyFile));
   const runtime = storkPolicy.backend.runtimeRelease;
   const alreadyBound =
@@ -215,7 +264,11 @@ export function bindGalileoBackendRuntime(input: BindInput): {
   ) {
     throw new Error(`unexpected Galileo release policy status: ${releasePolicy.status}`);
   }
+  if (pending && productReviewPolicySha256 !== currentStorkPolicySha256) {
+    throw new Error('Galileo product review does not bind the exact pending Stork policy bytes');
+  }
 
+  let boundStorkPolicySha256 = currentStorkPolicySha256;
   if (!alreadyBound) {
     storkPolicy.backend.runtimeRelease = {
       sourceCommit,
@@ -223,10 +276,38 @@ export function bindGalileoBackendRuntime(input: BindInput): {
       status: 'reviewed_immutable_backend_release',
     };
     validateStorkDeploymentPolicy(storkPolicy);
+    boundStorkPolicySha256 = jsonSha256(storkPolicy);
     // Write the runtime binding first. If the second write fails, the release
     // remains blocked rather than becoming active without an immutable artifact.
     writeJson(storkPolicyFile, storkPolicy);
   }
+
+  const interruptedPendingStorkPolicy = JSON.parse(JSON.stringify(storkPolicy)) as StorkDeploymentPolicy;
+  interruptedPendingStorkPolicy.backend.runtimeRelease = {
+    sourceCommit: null,
+    artifactManifestSha256: null,
+    status: 'pending_final_immutable_backend_release',
+  };
+  validateStorkDeploymentPolicy(interruptedPendingStorkPolicy);
+  const interruptedPendingStorkPolicySha256 = jsonSha256(interruptedPendingStorkPolicy);
+  const productReviewAlreadyBound = productReviewPolicySha256 === boundStorkPolicySha256;
+  if (
+    !productReviewAlreadyBound &&
+    !(
+      releasePolicy.status === PENDING_RELEASE_STATUS &&
+      productReviewPolicySha256 === interruptedPendingStorkPolicySha256
+    )
+  ) {
+    throw new Error('Galileo product review does not bind the pending or reviewed Stork policy bytes');
+  }
+  if (releasePolicy.status === ACTIVE_RELEASE_STATUS && !productReviewAlreadyBound) {
+    throw new Error('active Galileo release is missing the exact product-review Stork policy binding');
+  }
+  if (!productReviewAlreadyBound) {
+    initialPricePolicy.policySha256 = boundStorkPolicySha256;
+    writeJson(productReviewFile, productReview);
+  }
+
   if (releasePolicy.status !== ACTIVE_RELEASE_STATUS) {
     if (releasePolicy.policyVersion !== 3) {
       throw new Error(`expected pending Galileo release policy version 3, got ${releasePolicy.policyVersion}`);
@@ -237,7 +318,14 @@ export function bindGalileoBackendRuntime(input: BindInput): {
     writeJson(releasePolicyFile, releasePolicy);
   }
 
-  return { sourceCommit, artifactPolicySha256, storkPolicyFile, releasePolicyFile };
+  return {
+    sourceCommit,
+    artifactPolicySha256,
+    storkPolicySha256: boundStorkPolicySha256,
+    storkPolicyFile,
+    productReviewFile,
+    releasePolicyFile,
+  };
 }
 
 function required(value: string | undefined, label: string): string {
@@ -266,7 +354,8 @@ function main(): void {
   });
   console.log(`bound Galileo backend runtime source ${result.sourceCommit}`);
   console.log(`bound approved artifact-policy SHA-256 ${result.artifactPolicySha256}`);
-  console.log('Review and commit only the two tracked policy files; no deployment was performed.');
+  console.log(`bound Galileo product review to Stork policy SHA-256 ${result.storkPolicySha256}`);
+  console.log('Review and commit only the three tracked policy files; no deployment was performed.');
 }
 
 if (require.main === module) main();
