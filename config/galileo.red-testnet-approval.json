@@ -16,10 +16,10 @@
     "role": "product_and_release_owner"
   },
   "decision": "approve_exact_galileo_testnet_release",
-  "approvedAt": "2026-07-13T13:49:31Z",
+  "approvedAt": "2026-07-13T14:21:47Z",
   "mainnetExternalReviewWaived": false,
   "candidate": {
-    "releaseCommit": "3c7038f179e99f7235e80409bff5ea664805889c",
+    "releaseCommit": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
     "sourceTree": "55f5733b8106d80edda01d4566bf993f611929dc",
     "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
     "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
@@ -30,20 +30,20 @@
     "verifierConfigSha256": "c66c78d683188153904bc4f8d19872ad32132d511d45c8f20a3e020d874b4c79",
     "verifierSignerCount": 3,
     "verifierSignerBitmask": 7,
-    "deploymentIntentId": "0x5fe9cd4cc986226d2acd9e7771e4fd6d741892606cc900b7b52a8e8e2a522b71",
-    "deploymentNonce": "20260713070851",
-    "expiresAt": 1783969731,
+    "deploymentIntentId": "0xda37df7252b25269ba201896402174e82a1dad681a8d3680b13d191f4519b653",
+    "deploymentNonce": "202607131422",
+    "expiresAt": 1783974027,
     "deployer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
     "sequencer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
-    "firstTransactionNonce": 309,
-    "expectedFirstContract": "0x8557C17BAb9694BD14A71e2EC017Efa9C4BE1e2d"
+    "firstTransactionNonce": 334,
+    "expectedFirstContract": "0x3dd0c7A1f6173400b5E66097D53BadA09a63Ef60"
   },
   "deterministicCi": {
     "provider": "github_actions",
     "repository": "Bond-xyz/vertex-contracts",
     "workflow": "Galileo deterministic release gate",
-    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29254512681",
-    "headSha": "3c7038f179e99f7235e80409bff5ea664805889c",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29257061568",
+    "headSha": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
     "conclusion": "success",
     "checks": [
       "compile",
@@ -55,11 +55,11 @@
   },
   "independentAgentReviews": [
     {
-      "agent": "Codex /root/review_finalizer_reconciliation_safety",
-      "reviewedCommit": "3c7038f179e99f7235e80409bff5ea664805889c",
+      "agent": "Codex independent fresh-graph candidate reviewer",
+      "reviewedCommit": "efe869c585fa72cf2b8d86147918d3e52e6b7be4",
       "conclusion": "approved",
-      "evidenceSha256": "69ecb9740fd04ceb3f938c6847eca44730853c91e3b860d7e6e13940ca11d230",
-      "summary": "Exact pristine-finalizer candidate independently approved: untouched steps with exact latest/pending nonce avoid only the obsolete history scan; any prior intent, attempt, ownership tombstone, or nonce advance still requires the bounded canonical-history proof and fails closed beyond 512 blocks. Exact calldata/nonce journal binding, fresh signed Stork check before every send, canonical transaction/receipt/block verification, and 12-confirmation finality are unchanged. Focused journal tests 26/26 passed; exact-head CI run 29254512681 passed compile, interface diff, product review, release tests, and gitleaks. Contracts and deploy script are unchanged; stale tracked Red approval is correctly deleted so replacement approval can follow this exact candidate. Live read-only state showed nonce 333 latest/pending and blank Endpoint/product graph; no broadcast performed."
+      "evidenceSha256": "d7dd8d665f1e10e0d6ca53e41f128aeb5bb52b6ca9bead83035753a884f5d1cd",
+      "summary": "Exact PR #18 candidate independently approved: the candidate removes only the spent prior single-use Red approval; its source tree is byte-for-byte identical to the previously reviewed pre-approval contract candidate. Exact-head deterministic CI passed compile, interface diff, product-vector review, release tests, and gitleaks. Live Galileo state confirmed deployer nonce 334, unused deterministic first-contract address, exact pinned USDC.e, and no funds or products in the abandoned unpublished graph."
     }
   ]
 }
