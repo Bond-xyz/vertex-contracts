@@ -14,13 +14,13 @@ import 'hardhat-gas-reporter';
 import 'hardhat-contract-sizer';
 import 'hardhat-abi-exporter';
 import { HardhatUserConfig } from 'hardhat/config';
+import { galileoHardhatFeeConfig } from './scripts/galileo-fee-policy';
 
 dotenv.config({
   path: process.env.PERPDEX_ENV_FILE || '.env.galileo.local',
 });
 
-const galileoRpcUrl =
-  process.env.PERPDEX_GALILEO_RPC_URL || process.env.GALILEO_RPC_URL;
+const galileoRpcUrl = process.env.PERPDEX_GALILEO_RPC_URL || process.env.GALILEO_RPC_URL;
 const galileoDeployerKey = process.env.PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY;
 const galileoChainId = Number(process.env.GALILEO_CHAIN_ID || '16602');
 
@@ -34,6 +34,7 @@ if (galileoRpcUrl && galileoDeployerKey) {
     url: galileoRpcUrl,
     chainId: galileoChainId,
     accounts: [galileoDeployerKey],
+    ...galileoHardhatFeeConfig(),
     timeout: 120000,
   };
 }

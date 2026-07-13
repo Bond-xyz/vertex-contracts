@@ -10,7 +10,7 @@ import {
   GALILEO_USDCE_SYMBOL,
 } from './deployment-config';
 
-export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = 'b103e1664496182340291985e16093ba004a9ba06a0d70e1a61f69f9772c3094';
+export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = '6f3dc51ad5b5d67b8ff75495517f19f05ce0bef927559a2563dc8d9f5d7b5b32';
 export const GALILEO_PREPARE_TRANSACTION_COUNT = 24;
 export const GALILEO_FINALIZE_TRANSACTION_COUNT = 5;
 
@@ -43,6 +43,14 @@ const safeNonce = (value: number): number => {
 };
 
 const sha256File = (file: string): string => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+export function assertGalileoDeploymentScriptMatchesPlan(
+  deployScript = path.resolve(__dirname, 'deploy-galileo.ts')
+): void {
+  if (sha256File(deployScript) !== GALILEO_DEPLOYMENT_SCRIPT_SHA256) {
+    throw new Error('deployment script changed; rederive and review the transaction-offset plan');
+  }
+}
 
 export function createGalileoAddressPlan(deployerInput: string, sequencerInput: string, nonceInput: number) {
   const deployer = nonzeroAddress(deployerInput, 'deployer');
@@ -208,9 +216,7 @@ function required(value: string | undefined, label: string): string {
 
 export function writeGalileoAddressPlan(): void {
   const deployScript = path.resolve(__dirname, 'deploy-galileo.ts');
-  if (sha256File(deployScript) !== GALILEO_DEPLOYMENT_SCRIPT_SHA256) {
-    throw new Error('deployment script changed; rederive and review the transaction-offset plan');
-  }
+  assertGalileoDeploymentScriptMatchesPlan(deployScript);
   const nonce = Number(required(process.env.PERPDEX_FIRST_TRANSACTION_NONCE, 'PERPDEX_FIRST_TRANSACTION_NONCE'));
   const plan = createGalileoAddressPlan(
     required(process.env.PERPDEX_DEPLOYER_ADDRESS, 'PERPDEX_DEPLOYER_ADDRESS'),
