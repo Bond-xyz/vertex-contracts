@@ -47,6 +47,18 @@ corepack yarn intent:galileo
 
 The deployer must still have that exact pending nonce, the intent must be unexpired, and the expected first contract address must have no bytecode immediately before the first transaction. The sanctions deployment explicitly consumes that nonce. Once any first transaction is mined, the approval cannot authorize another graph; partial-deployment recovery requires a new intent, a fresh deterministic evidence run, and a new tracked Red approval.
 
+Before creating the intent, derive the complete unsigned EOA nonce/address plan from public values only. The generator is bound to the reviewed deployment-script SHA-256 and fails if the transaction layout changes. It records the 24 preparation transactions, all 19 top-level CREATE addresses, the five finalization calls, exact roles, pinned collateral, product IDs, Stork bounds, and 12-confirmation policy. The file is ignored release input; it is not a deployment manifest and authorizes no transaction.
+
+```bash
+export PERPDEX_DEPLOYER_ADDRESS=0x...
+export PERPDEX_SEQUENCER_ADDRESS=0x...
+export PERPDEX_FIRST_TRANSACTION_NONCE=<current-pending-nonce>
+export PERPDEX_ADDRESS_PLAN_FILE=./deployments/16602/address-plan.local.json
+corepack yarn plan:galileo:addresses
+```
+
+Immediately before intent creation, recheck that the pending nonce still matches the plan, every planned CREATE address has empty code, the deployer has sufficient native gas, and the RPC reports chain `16602`. If any check drifts, discard the plan and derive it again; never reuse or edit it.
+
 After the product vector, policy, verifier config, deployment intent, GitHub CI, and agent-review evidence are all ready, `corepack yarn approval:galileo:red` creates a pending tracked approval artifact. It never approves itself. Red reviews the exact hashes, changes only `decision` to `approve_exact_galileo_testnet_release`, records `approvedAt`, and commits only that file. The deployment script rejects an approval file supplied from any untracked or environment-overridden location.
 
 The deployment script recomputes the approved candidate boundary and every bound digest immediately before its first transaction. It rejects a zero operator, mismatched deployer/sequencer intent, duplicate Verifier keys, and any pre-existing Galileo OpenZeppelin network manifest. After all transactions, it repeats the complete validation and refuses to write a schema-v9 deployment manifest if the approval, intent, candidate, policy, build, product review, Verifier evidence, CI evidence, agent review, or reviewed contract diff drifted. The standalone verifier repeats the same checks against both the local checkout and schema-v9 manifest.
@@ -117,6 +129,7 @@ export PERPDEX_PRODUCT_REVIEW_FILE=./config/galileo.product-approval-review.json
 export PERPDEX_RED_APPROVAL_FILE=./config/galileo.red-testnet-approval.json
 export PERPDEX_DEPLOYMENT_INTENT_FILE=./config/galileo.deployment-intent.local.json
 export PERPDEX_STORK_SNAPSHOT_FILE=./config/galileo.stork-deployment-snapshot.local.json
+export PERPDEX_ADDRESS_PLAN_FILE=./deployments/16602/address-plan.local.json
 export PERPDEX_PREPARED_DEPLOYMENT=./deployments/16602/prepared.local.json
 export PERPDEX_FINALIZATION_JOURNAL=./deployments/16602/finalization.local.json
 export PERPDEX_DEPLOYMENT_MANIFEST=./deployments/16602/latest.local.json
