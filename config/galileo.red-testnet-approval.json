@@ -16,11 +16,11 @@
     "role": "product_and_release_owner"
   },
   "decision": "approve_exact_galileo_testnet_release",
-  "approvedAt": "2026-07-13T15:09:53Z",
+  "approvedAt": "2026-07-13T15:44:46Z",
   "mainnetExternalReviewWaived": false,
   "candidate": {
-    "releaseCommit": "4abb9de45d59795c830576dd78f938258adfca6b",
-    "sourceTree": "2c04fb97b43010c6c628918fa1303ebdff31b415",
+    "releaseCommit": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
+    "sourceTree": "41ab8f6759efd4f29cbbd8b782aa7c8aa703adf6",
     "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
     "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
     "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
@@ -30,20 +30,20 @@
     "verifierConfigSha256": "c66c78d683188153904bc4f8d19872ad32132d511d45c8f20a3e020d874b4c79",
     "verifierSignerCount": 3,
     "verifierSignerBitmask": 7,
-    "deploymentIntentId": "0x1347ba1ad7003247eb699856ec5184adaa78f83784851051925acd6cacdc2052",
-    "deploymentNonce": "202607131510",
-    "expiresAt": 1783976912,
+    "deploymentIntentId": "0xa6eab0bfa65283684d5b5c612f2346d48b77d593927136aa6b9d6b25a1442724",
+    "deploymentNonce": "202607131535",
+    "expiresAt": 1783978516,
     "deployer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
     "sequencer": "0xbD58414C999391F610B11F0a4BFc0037543A0e76",
-    "firstTransactionNonce": 360,
-    "expectedFirstContract": "0x6aF82f922Cc47f6d7fA4bb015ac949fDD1D7BBc0"
+    "firstTransactionNonce": 385,
+    "expectedFirstContract": "0xB7A0B942cE008DCF2E6caDDF335bD0113E3e3227"
   },
   "deterministicCi": {
     "provider": "github_actions",
     "repository": "Bond-xyz/vertex-contracts",
     "workflow": "Galileo deterministic release gate",
-    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29260508548",
-    "headSha": "4abb9de45d59795c830576dd78f938258adfca6b",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29263106379",
+    "headSha": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
     "conclusion": "success",
     "checks": [
       "compile",
@@ -55,11 +55,11 @@
   },
   "independentAgentReviews": [
     {
-      "agent": "Codex independent Galileo finalizer timing reviewer",
-      "reviewedCommit": "4abb9de45d59795c830576dd78f938258adfca6b",
+      "agent": "Codex independent Galileo fixed-gas finalizer reviewer",
+      "reviewedCommit": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
       "conclusion": "approved",
-      "evidenceSha256": "a7ac0829b6d614751feffa8b9b23db4219f0edcd1f3a76614df8b248c82ec822",
-      "summary": "Exact candidate approved: product-ID decoding safely handles ethers number and BigNumber shapes; the finalizer durably ownership-journals and broadcasts exactly Endpoint.initialize plus product 2/4/6/8 in one same-signer gap-free nonce sequence before receipt waits, while canonical transaction, receipt, state, ownership, recovery, terminal-abandonment, and 12-confirmation checks remain fail closed. The pending-nonce rule permits only a contiguous one-attempt durable journal prefix. Signed Stork freshness is rechecked before every send and at receipt blocks under the unchanged 30-second age and 3-second spread policy. No Solidity, collateral, products, markets, Stork policy, or backend baseline changed; exact Galileo USDC.e remains pinned. Local release tests passed 91/91 and exact-head CI run 29260508548 passed compile, interface diff, product review, release tests, and gitleaks."
+      "evidenceSha256": "041763bdd9c0b096b17f5db8150c6bba2ad6dd5ec6ca304d1554c0a1e34bb528",
+      "summary": "Exact candidate approved: every Endpoint.initialize and product 2/4/6/8 send uses a fixed 1,000,000 gas limit, eliminating ethers estimation against unconfirmed prerequisite state while preserving the exact gap-free nonce packet. The live block-limit preflight fails before broadcast when the limit cannot fit. Durable ownership, transaction-hash persistence, receipt and canonical-state verification, restart recovery, terminal abandonment, signed-Stork freshness, and 12-confirmation finality remain fail closed. No Solidity, product, collateral, exact USDC.e, market, or Stork-policy changes occurred. Focused tests passed 28/28, the release suite passed 93/93, ESLint passed, exact-head GitHub CI run 29263106379 passed all deterministic release checks, and the spent nonce-360 approval was correctly deleted."
     }
   ]
 }

@@ -13,6 +13,7 @@ import {
   FinalizationJournal,
   FinalizationRunInput,
   FinalizationStepPlan,
+  GALILEO_FINALIZATION_GAS_LIMIT,
   loadAndValidateFinalizationJournal,
   portableArtifactReference,
   reserveFinalizationJournal,
@@ -58,12 +59,15 @@ class FakeChain {
   pendingNonce = 7;
   latestBlock = 100;
   sendCount = 0;
+  estimationAttemptCount = 0;
   blockScanCount = 0;
   sentNonces: number[] = [];
+  sentRequests: providers.TransactionRequest[] = [];
   sendDelayMs = 0;
   holdLatestNonceOnSend = false;
   firstReceiptReadAfterSendCount: number | undefined;
   revertNext = false;
+  blockGasLimit = BigNumber.from(30_000_000);
   transactions = new Map<string, providers.TransactionResponse>();
   receipts = new Map<string, providers.TransactionReceipt>();
   blocks = new Map<number, providers.BlockWithTransactions>();
@@ -81,7 +85,7 @@ class FakeChain {
       timestamp: 1_000 + number,
       nonce: '0x0000000000000000',
       difficulty: 0,
-      gasLimit: BigNumber.from(30_000_000),
+      gasLimit: this.blockGasLimit,
       gasUsed: BigNumber.from(0),
       miner: DEPLOYER,
       extraData: '0x',
@@ -93,7 +97,12 @@ class FakeChain {
 
   async sendTransaction(request: providers.TransactionRequest): Promise<providers.TransactionResponse> {
     if (this.sendDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.sendDelayMs));
+    if (request.gasLimit === undefined || request.gasLimit === null) {
+      this.estimationAttemptCount += 1;
+      throw new Error('gas estimation would evaluate a later nonce against pre-finalization state');
+    }
     this.sendCount += 1;
+    this.sentRequests.push(request);
     const nonce = Number(request.nonce);
     this.sentNonces.push(nonce);
     const hash = utils.keccak256(
@@ -105,7 +114,7 @@ class FakeChain {
       from: DEPLOYER,
       to: request.to as string,
       nonce,
-      gasLimit: BigNumber.from(1_000_000),
+      gasLimit: BigNumber.from(request.gasLimit),
       gasPrice: BigNumber.from(1),
       data: request.data as string,
       value: BigNumber.from(0),
@@ -143,7 +152,12 @@ class FakeChain {
 
   provider() {
     return {
-      getBlockNumber: async () => this.latestBlock,
+      getBlockNumber: async () => {
+        if (!this.blocks.has(this.latestBlock)) {
+          this.blocks.set(this.latestBlock, this.block(this.latestBlock, []));
+        }
+        return this.latestBlock;
+      },
       getBlockWithTransactions: async (number: number) => {
         this.blockScanCount += 1;
         return this.blocks.get(number)!;
@@ -248,6 +262,52 @@ describe('durable Galileo finalization journal', () => {
     expect(chain.sendCount).to.equal(5);
     expect(chain.firstReceiptReadAfterSendCount).to.equal(5);
     expect(fs.statSync(journalFile).mode & 0o777).to.equal(0o600);
+  });
+
+  it('broadcasts the exact five-step packet with a fixed gas limit and no estimation dependency', async () => {
+    chain.holdLatestNonceOnSend = true;
+
+    const journal = await run();
+
+    expect(journal.status).to.equal('complete');
+    expect(chain.estimationAttemptCount).to.equal(0);
+    expect(chain.sentRequests).to.have.length(expected.steps.length);
+    for (const [index, request] of chain.sentRequests.entries()) {
+      const step = expected.steps[index];
+      expect(Object.keys(request).sort()).to.deep.equal(['data', 'from', 'gasLimit', 'nonce', 'to', 'value']);
+      expect(utils.getAddress(request.from as string)).to.equal(utils.getAddress(step.from));
+      expect(utils.getAddress(request.to as string)).to.equal(utils.getAddress(step.to));
+      expect(Number(request.nonce)).to.equal(step.nonce);
+      expect(BigNumber.from(request.value)).to.equal(BigNumber.from(step.value));
+      expect(request.data).to.equal(step.calldata);
+      expect(BigNumber.from(request.gasLimit).toNumber()).to.equal(GALILEO_FINALIZATION_GAS_LIMIT);
+    }
+    expect(
+      journal.steps.map(({ id, kind, symbol, productId, from, to, nonce, value, calldata, selector, argsSha256 }) => ({
+        id,
+        kind,
+        ...(symbol === undefined ? {} : { symbol }),
+        ...(productId === undefined ? {} : { productId }),
+        from,
+        to,
+        nonce,
+        value,
+        calldata,
+        selector,
+        argsSha256,
+      }))
+    ).to.deep.equal(expected.steps);
+  });
+
+  it('fails before broadcasting when the fixed gas limit does not fit the live block', async () => {
+    chain.blockGasLimit = BigNumber.from(GALILEO_FINALIZATION_GAS_LIMIT - 1);
+    chain.blocks.set(100, { ...chain.blocks.get(100)!, gasLimit: chain.blockGasLimit });
+
+    await expect(run()).to.be.rejectedWith(
+      `Galileo finalization gas limit ${GALILEO_FINALIZATION_GAS_LIMIT} exceeds live block gas limit`
+    );
+    expect(chain.sendCount).to.equal(0);
+    expect(chain.estimationAttemptCount).to.equal(0);
   });
 
   it('uses exact pristine account nonces without aging the signed packet through an obsolete history scan', async () => {
