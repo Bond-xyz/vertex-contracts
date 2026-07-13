@@ -16,11 +16,11 @@
     "role": "product_and_release_owner"
   },
   "decision": "approve_exact_galileo_testnet_release",
-  "approvedAt": "2026-07-13T07:11:42Z",
+  "approvedAt": "2026-07-13T13:49:31Z",
   "mainnetExternalReviewWaived": false,
   "candidate": {
-    "releaseCommit": "635dea434e242b0746d868515286aae1139874cf",
-    "sourceTree": "cdc9f1736faf686046dad7a0c573ebd4bfbc7bc3",
+    "releaseCommit": "3c7038f179e99f7235e80409bff5ea664805889c",
+    "sourceTree": "55f5733b8106d80edda01d4566bf993f611929dc",
     "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
     "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
     "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
@@ -42,23 +42,24 @@
     "provider": "github_actions",
     "repository": "Bond-xyz/vertex-contracts",
     "workflow": "Galileo deterministic release gate",
-    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29230685251",
-    "headSha": "635dea434e242b0746d868515286aae1139874cf",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29254512681",
+    "headSha": "3c7038f179e99f7235e80409bff5ea664805889c",
     "conclusion": "success",
     "checks": [
       "compile",
       "contract-interface-diff",
+      "product-vector-review",
       "release-tests",
       "gitleaks"
     ]
   },
   "independentAgentReviews": [
     {
-      "agent": "Codex /root/review_graph_recovery",
-      "reviewedCommit": "635dea434e242b0746d868515286aae1139874cf",
+      "agent": "Codex /root/review_finalizer_reconciliation_safety",
+      "reviewedCommit": "3c7038f179e99f7235e80409bff5ea664805889c",
       "conclusion": "approved",
-      "evidenceSha256": "bee34286d5e581abd218787da661a5b6035862af11a7564cd636c789a6cb5567",
-      "summary": "Exact merged Galileo runtime-hash candidate independently approved: merge tree byte-identical to reviewed PR #15 head, exact push CI and 88/88 release tests green, canonical bytes32 validation and deploy/planner 24+5 binding verified, contracts and artifacts unchanged, stale approval absent, pending nonce 309 and all 19 CREATE addresses empty; no broadcast or approval generation performed."
+      "evidenceSha256": "69ecb9740fd04ceb3f938c6847eca44730853c91e3b860d7e6e13940ca11d230",
+      "summary": "Exact pristine-finalizer candidate independently approved: untouched steps with exact latest/pending nonce avoid only the obsolete history scan; any prior intent, attempt, ownership tombstone, or nonce advance still requires the bounded canonical-history proof and fails closed beyond 512 blocks. Exact calldata/nonce journal binding, fresh signed Stork check before every send, canonical transaction/receipt/block verification, and 12-confirmation finality are unchanged. Focused journal tests 26/26 passed; exact-head CI run 29254512681 passed compile, interface diff, product review, release tests, and gitleaks. Contracts and deploy script are unchanged; stale tracked Red approval is correctly deleted so replacement approval can follow this exact candidate. Live read-only state showed nonce 333 latest/pending and blank Endpoint/product graph; no broadcast performed."
     }
   ]
 }

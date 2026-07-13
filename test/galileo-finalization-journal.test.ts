@@ -58,6 +58,7 @@ class FakeChain {
   pendingNonce = 7;
   latestBlock = 100;
   sendCount = 0;
+  blockScanCount = 0;
   sentNonces: number[] = [];
   sendDelayMs = 0;
   revertNext = false;
@@ -141,7 +142,10 @@ class FakeChain {
   provider() {
     return {
       getBlockNumber: async () => this.latestBlock,
-      getBlockWithTransactions: async (number: number) => this.blocks.get(number)!,
+      getBlockWithTransactions: async (number: number) => {
+        this.blockScanCount += 1;
+        return this.blocks.get(number)!;
+      },
       getTransaction: async (hash: string) => this.transactions.get(hash) || null,
       getTransactionReceipt: async (hash: string) => this.receipts.get(hash) || null,
       getTransactionCount: async (_address: string, tag: string) =>
@@ -231,6 +235,33 @@ describe('durable Galileo finalization journal', () => {
     expect(verified).to.deep.equal(expected.steps.map((step) => step.id));
     expect(chain.sendCount).to.equal(5);
     expect(fs.statSync(journalFile).mode & 0o777).to.equal(0o600);
+  });
+
+  it('uses exact pristine account nonces without aging the signed packet through an obsolete history scan', async () => {
+    chain.latestBlock = 700;
+
+    const journal = await run();
+
+    expect(journal.status).to.equal('complete');
+    expect(chain.sendCount).to.equal(5);
+    expect(chain.blockScanCount).to.equal(0);
+  });
+
+  it('retains the 512-block fail-closed scan for a prior broadcast boundary', async () => {
+    await expect(
+      run({
+        testOnlyAfterIntentBeforeSend: () => {
+          throw new Error('injected stop after durable broadcast intent');
+        },
+      })
+    ).to.be.rejectedWith('injected stop after durable broadcast intent');
+    expect(chain.sendCount).to.equal(0);
+
+    chain.latestBlock = 613;
+    await expect(run()).to.be.rejectedWith(
+      'finalization nonce reconciliation exceeds the 512-block fail-closed scan window'
+    );
+    expect(chain.sendCount).to.equal(0);
   });
 
   it('recovers a crash after send but before hash persistence without broadcasting the economic step twice', async () => {
