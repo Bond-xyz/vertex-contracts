@@ -1,7 +1,12 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { expect } from 'chai';
 import { utils } from 'ethers';
 import {
+  assertGalileoDeploymentScriptMatchesPlan,
   createGalileoAddressPlan,
+  GALILEO_DEPLOYMENT_SCRIPT_SHA256,
   GALILEO_FINALIZE_TRANSACTION_COUNT,
   GALILEO_PREPARE_TRANSACTION_COUNT,
 } from '../scripts/create-galileo-address-plan';
@@ -20,6 +25,22 @@ describe('unsigned Galileo CREATE/address plan', () => {
     );
     expect(plan.preparation.finalizationStartingNonce).to.equal(307);
     expect(plan.finalization.lastNonce).to.equal(311);
+  });
+
+  it('allows address planning only for the exact reviewed fee-policy deployment script', () => {
+    expect(GALILEO_DEPLOYMENT_SCRIPT_SHA256).to.equal(
+      '6f3dc51ad5b5d67b8ff75495517f19f05ce0bef927559a2563dc8d9f5d7b5b32'
+    );
+    expect(() => assertGalileoDeploymentScriptMatchesPlan()).not.to.throw();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-fee-plan-'));
+    const mutatedScript = path.join(directory, 'deploy-galileo.ts');
+    fs.writeFileSync(
+      mutatedScript,
+      `${fs.readFileSync(path.resolve(__dirname, '..', 'scripts/deploy-galileo.ts'), 'utf8')}\n// mutation\n`
+    );
+    expect(() => assertGalileoDeploymentScriptMatchesPlan(mutatedScript)).to.throw(
+      'deployment script changed; rederive and review the transaction-offset plan'
+    );
   });
 
   it('pins the reviewed CREATE offsets and call targets', () => {
