@@ -277,6 +277,7 @@ export function loadAndValidateGalileoLateReceiptRecoveryApproval(
   input: {
     repoRoot?: string;
     approvalFile?: string;
+    expectedApprovalSha256?: string;
   } = {}
 ): VerifiedGalileoLateReceiptRecoveryApproval {
   const repoRoot = input.repoRoot || repositoryRoot();
@@ -286,13 +287,23 @@ export function loadAndValidateGalileoLateReceiptRecoveryApproval(
   if (approvalFile !== path.resolve(repoRoot, TRACKED_GALILEO_LATE_RECEIPT_RECOVERY_APPROVAL)) {
     throw new Error('Galileo late-receipt recovery approval must be the tracked repository artifact');
   }
+  const approvalSha256 = sha256File(approvalFile);
+  const expectedApprovalSha256 = input.expectedApprovalSha256 || process.env.PERPDEX_RECOVERY_AUTHORIZATION_SHA256;
+  if (
+    !expectedApprovalSha256 ||
+    approvalSha256 !== sha256(expectedApprovalSha256, 'externally supplied recovery approval')
+  ) {
+    throw new Error(
+      'PERPDEX_RECOVERY_AUTHORIZATION_SHA256 must externally pin the exact tracked recovery approval bytes'
+    );
+  }
   const approval = JSON.parse(fs.readFileSync(approvalFile, 'utf8')) as GalileoLateReceiptRecoveryApproval;
   validateApprovalIdentity(approval);
   validateAuthorizedSource(repoRoot, approval);
   return {
     approval,
     approvalFile,
-    approvalSha256: sha256File(approvalFile),
+    approvalSha256,
     approvalDigest: deterministicSha256(approval),
   };
 }

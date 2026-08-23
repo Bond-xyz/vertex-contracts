@@ -177,6 +177,15 @@ describe('Galileo late canonical receipt recovery', () => {
   let recoveryInput: LateReceiptRecoveryInput;
   let originalBytes: Buffer;
 
+  function trackedRecoveryApproval() {
+    const repoRoot = repositoryRoot();
+    const approvalFile = path.join(repoRoot, 'config', 'galileo.late-receipt-recovery-approval.json');
+    return loadAndValidateGalileoLateReceiptRecoveryApproval({
+      repoRoot,
+      expectedApprovalSha256: sha256File(approvalFile),
+    });
+  }
+
   function rewriteRecoveredPacket(journal: RecoveredFinalizationJournal, manifest: Record<string, any>): void {
     const journalBytes = Buffer.from(`${JSON.stringify(journal, null, 2)}\n`);
     const journalSha256 = utils.sha256(journalBytes).slice(2);
@@ -308,7 +317,7 @@ describe('Galileo late canonical receipt recovery', () => {
 
   it('passes the tracked recovery-only source authorization preflight end to end', () => {
     const repoRoot = repositoryRoot();
-    const verified = loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot });
+    const verified = trackedRecoveryApproval();
     const redApprovalFile = path.join(repoRoot, 'config', 'galileo.red-testnet-approval.json');
     const redApproval = JSON.parse(fs.readFileSync(redApprovalFile, 'utf8'));
     assertGalileoLateReceiptRecoveryCandidateBinding(verified, {
@@ -324,8 +333,24 @@ describe('Galileo late canonical receipt recovery', () => {
     );
   });
 
+  it('requires an external exact hash pin for the tracked recovery approval bytes', () => {
+    const repoRoot = repositoryRoot();
+    const prior = process.env.PERPDEX_RECOVERY_AUTHORIZATION_SHA256;
+    delete process.env.PERPDEX_RECOVERY_AUTHORIZATION_SHA256;
+    try {
+      expect(() => loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot })).to.throw(
+        'must externally pin the exact tracked recovery approval bytes'
+      );
+      expect(() =>
+        loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot, expectedApprovalSha256: '00'.repeat(32) })
+      ).to.throw('must externally pin the exact tracked recovery approval bytes');
+    } finally {
+      if (prior) process.env.PERPDEX_RECOVERY_AUTHORIZATION_SHA256 = prior;
+    }
+  });
+
   it('requires externally approved recovery metadata for the exact Red v2 deployment', () => {
-    const verified = loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot: repositoryRoot() });
+    const verified = trackedRecoveryApproval();
     const approval = verified.approval;
     const manifest = {
       release: approval.releaseId,
