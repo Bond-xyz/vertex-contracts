@@ -1,0 +1,9 @@
+# Exact false-positive fingerprints in the immutable, credential-free chain-16602
+# recovery manifest. Lines 113, 157, and 245 are expired historical ownerToken
+# journal locks; lines 1489 and 2218 are the canonical USDC.e token address.
+# Keep these fingerprint-scoped: do not replace them with a rule or path allowlist.
+bc5e5acac7d335d9b20e30cb293cfb54a3d1efc0:deployments/16602/contract-manifest.schema-v9.json:generic-api-key:113
+bc5e5acac7d335d9b20e30cb293cfb54a3d1efc0:deployments/16602/contract-manifest.schema-v9.json:generic-api-key:157
+bc5e5acac7d335d9b20e30cb293cfb54a3d1efc0:deployments/16602/contract-manifest.schema-v9.json:generic-api-key:245
+bc5e5acac7d335d9b20e30cb293cfb54a3d1efc0:deployments/16602/contract-manifest.schema-v9.json:generic-api-key:1489
+bc5e5acac7d335d9b20e30cb293cfb54a3d1efc0:deployments/16602/contract-manifest.schema-v9.json:generic-api-key:2218
