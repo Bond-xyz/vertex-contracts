@@ -29,7 +29,11 @@ import {
   sha256File,
 } from './release-evidence';
 import { TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
-import { collectAndVerifyRedTestnetReleaseEvidence, TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
+import {
+  collectAndVerifyRedTestnetRecoveryEvidence,
+  collectAndVerifyRedTestnetReleaseEvidence,
+  TRACKED_RED_GALILEO_APPROVAL,
+} from './red-testnet-approval';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
 import {
   assertStorkDeploymentSnapshotFresh,
@@ -51,6 +55,12 @@ import {
   verifyCanonicalFinalizationEvidence,
 } from './galileo-finalization-journal';
 import { assertLateReceiptRecoveryLinkage, RecoveredFinalizationJournal } from './galileo-late-receipt-recovery';
+import {
+  assertGalileoLateReceiptRecoveryInputs,
+  assertGalileoLateReceiptRecoveryManifestBinding,
+  isExactGalileoLateReceiptRecoveryDeployment,
+  loadAndValidateGalileoLateReceiptRecoveryApproval,
+} from './galileo-late-receipt-recovery-approval';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -155,14 +165,22 @@ async function main() {
   ) {
     throw new Error('deployment manifest is missing the tracked Red Galileo-testnet approval policy');
   }
-  const verifiedRelease = await collectAndVerifyRedTestnetReleaseEvidence({
+  const releaseEvidenceInput = {
     artifacts,
     productsFile,
     productReviewFile,
     verifierFile,
     approvalFile,
     deploymentIntentFile,
-  });
+  };
+  const lateReceiptRecoveryApproval = loadAndValidateGalileoLateReceiptRecoveryApproval();
+  const recoveryRequired = isExactGalileoLateReceiptRecoveryDeployment(manifest, lateReceiptRecoveryApproval);
+  const verifiedRelease = recoveryRequired
+    ? await collectAndVerifyRedTestnetRecoveryEvidence(releaseEvidenceInput)
+    : await collectAndVerifyRedTestnetReleaseEvidence(releaseEvidenceInput);
+  if (recoveryRequired) {
+    assertGalileoLateReceiptRecoveryManifestBinding(manifest, lateReceiptRecoveryApproval);
+  }
   if (
     manifest.source.backendProtocolBaselineCommit !== BACKEND_BETA_COMMIT ||
     JSON.stringify(manifest.source.backendRuntimeRelease) !==
@@ -373,8 +391,11 @@ async function main() {
     finalityConfirmations: 12,
     steps: finalizationSteps,
   });
-  if ((finalizationJournal as RecoveredFinalizationJournal).recovery) {
+  if (recoveryRequired) {
     const recovered = finalizationJournal as RecoveredFinalizationJournal;
+    if (!recovered.recovery) {
+      throw new Error('exact Red v2 deployment requires recovery metadata in its finalization journal');
+    }
     const originalJournalFile = resolvePortableArtifactReference(
       finalizationJournalFile,
       recovered.recovery.originalJournalReference
@@ -391,6 +412,12 @@ async function main() {
     ) {
       throw new Error('recovered deployment manifest does not assert the read-only late-receipt recovery gates');
     }
+    assertGalileoLateReceiptRecoveryInputs(lateReceiptRecoveryApproval, {
+      preparedFile,
+      snapshotFile,
+      originalJournalFile,
+      journal: JSON.parse(fs.readFileSync(originalJournalFile, 'utf8')),
+    });
     assertLateReceiptRecoveryLinkage({
       manifestFile,
       manifest,
@@ -400,6 +427,8 @@ async function main() {
       preparedFile,
       snapshotFile,
     });
+  } else if ((finalizationJournal as RecoveredFinalizationJournal).recovery || manifest.recovery) {
+    throw new Error('late-receipt recovery metadata is forbidden for a deployment outside the tracked approval');
   }
   if (
     finalizationJournal.status !== 'complete' ||

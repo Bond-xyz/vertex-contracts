@@ -26,10 +26,14 @@ import {
 } from './release-evidence';
 import {
   assertSameVerifiedRedTestnetReleaseEvidence,
-  collectAndVerifyRedTestnetReleaseEvidence,
+  collectAndVerifyRedTestnetRecoveryEvidence,
   TRACKED_RED_GALILEO_APPROVAL,
   VerifiedRedTestnetReleaseEvidence,
 } from './red-testnet-approval';
+import {
+  assertGalileoLateReceiptRecoveryInputs,
+  TRACKED_GALILEO_LATE_RECEIPT_RECOVERY_APPROVAL,
+} from './galileo-late-receipt-recovery-approval';
 import { TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
 import {
@@ -254,7 +258,7 @@ function exactRisk(risk: any, product: any): boolean {
 
 async function verifyCompleteLiveGraph(input: {
   prepared: PreparedDeployment;
-  preflight: Awaited<ReturnType<typeof collectAndVerifyRedTestnetReleaseEvidence>>;
+  preflight: Awaited<ReturnType<typeof collectAndVerifyRedTestnetRecoveryEvidence>>;
   products: ReturnType<typeof resolveProductsWithStorkPrices>;
   quote: string;
   endpoint: Contract;
@@ -413,7 +417,7 @@ async function verifyCompleteLiveGraph(input: {
 function buildRecoveredManifest(input: {
   files: RecoveryFiles;
   prepared: PreparedDeployment;
-  preflight: Awaited<ReturnType<typeof collectAndVerifyRedTestnetReleaseEvidence>>;
+  preflight: Awaited<ReturnType<typeof collectAndVerifyRedTestnetRecoveryEvidence>>;
   products: ReturnType<typeof resolveProductsWithStorkPrices>;
   storkPreflight: ReturnType<typeof collectGalileoStorkReleasePreflight>;
   contractDiff: Awaited<ReturnType<typeof collectContractInterfaceDiff>>;
@@ -499,6 +503,12 @@ function buildRecoveredManifest(input: {
         approvalSha256: preflight.approvalSha256,
         digest: preflight.approvalDigest,
         approval: preflight.approval,
+      },
+      lateReceiptRecoveryApproval: {
+        approvalFile: TRACKED_GALILEO_LATE_RECEIPT_RECOVERY_APPROVAL,
+        approvalSha256: preflight.lateReceiptRecoveryApproval.approvalSha256,
+        digest: preflight.lateReceiptRecoveryApproval.approvalDigest,
+        approval: preflight.lateReceiptRecoveryApproval.approval,
       },
       explicitDeltas: [
         'restore omitted Version.sol implementation',
@@ -649,7 +659,7 @@ function buildRecoveredManifest(input: {
 
 async function main(): Promise<void> {
   const files = recoveryFiles();
-  const preflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
+  const preflight = await collectAndVerifyRedTestnetRecoveryEvidence(redEvidenceInput(files));
   const prepared = JSON.parse(fs.readFileSync(files.preparedFile, 'utf8')) as PreparedDeployment;
   assertPreparedBinding(prepared, preflight);
   const quote = await checkedQuote();
@@ -739,6 +749,12 @@ async function main(): Promise<void> {
   }
   const productById = new Map(products.products.map((product) => [product.productId, product]));
   const originalBytes = fs.readFileSync(files.originalJournalFile);
+  assertGalileoLateReceiptRecoveryInputs(preflight.lateReceiptRecoveryApproval, {
+    preparedFile: files.preparedFile,
+    snapshotFile: files.snapshotFile,
+    originalJournalFile: files.originalJournalFile,
+    journal: JSON.parse(originalBytes.toString('utf8')),
+  });
   const result = await recoverLateCanonicalReceipts({
     originalJournalFile: files.originalJournalFile,
     originalManifestFile: files.originalManifestFile,
@@ -789,9 +805,17 @@ async function main(): Promise<void> {
         offchainExchange,
       }),
     buildManifest: ({ journal, journalSha256, recovery }) => {
-      const postflight = collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
+      const postflight = collectAndVerifyRedTestnetRecoveryEvidence(redEvidenceInput(files));
       return Promise.resolve(postflight).then((verifiedPostflight) => {
         assertSameVerifiedRedTestnetReleaseEvidence(preflight, verifiedPostflight);
+        if (
+          preflight.lateReceiptRecoveryApproval.approvalSha256 !==
+            verifiedPostflight.lateReceiptRecoveryApproval.approvalSha256 ||
+          preflight.lateReceiptRecoveryApproval.approvalDigest !==
+            verifiedPostflight.lateReceiptRecoveryApproval.approvalDigest
+        ) {
+          throw new Error('post-recovery provenance drift: late-receipt recovery approval changed');
+        }
         return buildRecoveredManifest({
           files,
           prepared,

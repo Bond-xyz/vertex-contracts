@@ -127,6 +127,17 @@ function requireSha256(value: string, label: string): string {
   return value.toLowerCase();
 }
 
+function canonicalTimestamp(value: string, label: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value || '')) {
+    throw new Error(`${label} must be a canonical millisecond UTC timestamp`);
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+    throw new Error(`${label} must be a real canonical UTC timestamp`);
+  }
+  return parsed;
+}
+
 function exactJsonBytes(value: unknown): Buffer {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -258,6 +269,7 @@ function exactTerminalJournal(journal: FinalizationJournal): void {
   ) {
     throw new Error('late-receipt recovery is allowed only for the exact known receipt-visibility terminal outcome');
   }
+  canonicalTimestamp(journal.terminal.recordedAt, 'original terminal recordedAt');
   if (
     journal.steps.length !== 5 ||
     journal.steps.some(
@@ -306,6 +318,7 @@ function validateManifestBinding(
     manifest.finalization?.status !== 'complete' ||
     manifest.finalization?.leaseScope !== journal.leaseScope ||
     manifest.finalization?.finalityConfirmations !== 12 ||
+    manifest.finalization?.finalityHeadBlock !== journal.recovery.canonicalHeadBlock ||
     manifest.finalization?.startingNonce !== journal.startingNonce ||
     manifest.finalization?.scanFromBlock !== journal.scanFromBlock ||
     canonicalJson(manifest.finalization?.steps) !== canonicalJson(journal.steps) ||
@@ -325,6 +338,8 @@ export function assertLateReceiptRecoveryLinkage(input: {
   snapshotFile?: string;
 }): void {
   const recovery = input.journal.recovery;
+  const originalTerminalRecordedAt = recovery?.originalTerminal?.recordedAt;
+  const recoveredAt = recovery?.recoveredAt;
   if (
     !recovery ||
     recovery.schemaVersion !== 1 ||
@@ -332,7 +347,18 @@ export function assertLateReceiptRecoveryLinkage(input: {
     recovery.explanation !== LATE_RECEIPT_RECOVERY_EXPLANATION ||
     recovery.originalTerminal?.stepId !== 'endpoint.initialize' ||
     recovery.originalTerminal?.outcome !== LATE_RECEIPT_VISIBILITY_OUTCOME ||
+    canonicalTimestamp(originalTerminalRecordedAt, 'recovery original terminal recordedAt') >
+      canonicalTimestamp(recoveredAt, 'recovery recordedAt') ||
+    path.basename(recovery.preparedFileName || '') !== recovery.preparedFileName ||
+    path.basename(recovery.snapshotFileName || '') !== recovery.snapshotFileName ||
+    !recovery.preparedFileName ||
+    !recovery.snapshotFileName ||
+    requireSha256(recovery.preparedFileSha256, 'recovery prepared file SHA-256') !== input.journal.preparedFileSha256 ||
+    requireSha256(recovery.snapshotEvidenceSha256, 'recovery snapshot evidence SHA-256') !==
+      input.journal.snapshotSha256 ||
+    !/^[0-9a-f]{64}$/i.test(recovery.snapshotFileSha256 || '') ||
     recovery.confirmationsRequired !== 12 ||
+    input.journal.finalityConfirmations !== recovery.confirmationsRequired ||
     recovery.noTransactionsBroadcast !== true ||
     !Number.isSafeInteger(recovery.canonicalHeadBlock) ||
     recovery.canonicalHeadBlock < 0 ||
@@ -343,7 +369,12 @@ export function assertLateReceiptRecoveryLinkage(input: {
         receipt.transactionHash.toLowerCase() !== input.journal.steps[index].receipt?.transactionHash.toLowerCase() ||
         receipt.blockNumber !== input.journal.steps[index].receipt?.blockNumber ||
         receipt.blockHash.toLowerCase() !== input.journal.steps[index].receipt?.blockHash.toLowerCase() ||
-        receipt.confirmationsObserved < 12
+        receipt.confirmationsObserved !== input.journal.steps[index].finality?.confirmationsObserved ||
+        receipt.confirmationsObserved !== recovery.canonicalHeadBlock - receipt.blockNumber + 1 ||
+        input.journal.steps[index].finality?.confirmationsRequired !== recovery.confirmationsRequired ||
+        input.journal.steps[index].finality?.observedHeadBlock !== recovery.canonicalHeadBlock ||
+        input.journal.steps[index].finality?.recordedAt !== recovery.recoveredAt ||
+        receipt.confirmationsObserved < recovery.confirmationsRequired
     )
   ) {
     throw new Error('late-receipt recovery metadata is invalid or incomplete');
@@ -366,6 +397,7 @@ export function assertLateReceiptRecoveryLinkage(input: {
     const original = JSON.parse(fs.readFileSync(input.originalJournalFile, 'utf8')) as FinalizationJournal;
     exactTerminalJournal(original);
     if (
+      canonicalJson(original.terminal) !== canonicalJson(recovery.originalTerminal) ||
       original.steps.some(
         (step, index) =>
           step.id !== input.journal.steps[index].id ||
@@ -380,6 +412,12 @@ export function assertLateReceiptRecoveryLinkage(input: {
     [input.snapshotFile, recovery.snapshotFileSha256, 'signed Stork snapshot'],
   ] as const) {
     if (file && sha256File(file) !== expectedSha256) throw new Error(`late-receipt recovery ${label} linkage changed`);
+  }
+  if (input.preparedFile && path.basename(input.preparedFile) !== recovery.preparedFileName) {
+    throw new Error('late-receipt recovery prepared filename linkage changed');
+  }
+  if (input.snapshotFile && path.basename(input.snapshotFile) !== recovery.snapshotFileName) {
+    throw new Error('late-receipt recovery snapshot filename linkage changed');
   }
 }
 
@@ -475,6 +513,12 @@ export async function recoverLateCanonicalReceipts(input: LateReceiptRecoveryInp
         confirmationsObserved: item.confirmationsObserved,
       })),
     };
+    if (
+      canonicalTimestamp(recovery.recoveredAt, 'recovery recordedAt') <
+      canonicalTimestamp(original.terminal!.recordedAt, 'original terminal recordedAt')
+    ) {
+      throw new Error('late-receipt recovery timestamp predates the terminal journal outcome');
+    }
     const journal = {
       ...original,
       manifestReference: portableArtifactReference(input.recoveredJournalFile, input.recoveredManifestFile),

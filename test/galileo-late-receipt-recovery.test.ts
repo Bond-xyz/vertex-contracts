@@ -12,11 +12,20 @@ import {
   runDurableFinalization,
 } from '../scripts/galileo-finalization-journal';
 import {
+  assertLateReceiptRecoveryLinkage,
   LateReceiptRecoveryInput,
   LATE_RECEIPT_RECOVERY_KIND,
   LATE_RECEIPT_VISIBILITY_OUTCOME,
   recoverLateCanonicalReceipts,
+  RecoveredFinalizationJournal,
 } from '../scripts/galileo-late-receipt-recovery';
+import {
+  assertGalileoLateReceiptRecoveryCandidateBinding,
+  assertGalileoLateReceiptRecoveryManifestBinding,
+  AUTHORIZED_LATE_RECEIPT_RECOVERY_SOURCE_FILES,
+  loadAndValidateGalileoLateReceiptRecoveryApproval,
+} from '../scripts/galileo-late-receipt-recovery-approval';
+import { deterministicSha256 as releaseEvidenceDigest, repositoryRoot, sha256File } from '../scripts/release-evidence';
 
 const DEPLOYER = '0x0000000000000000000000000000000000000001';
 const ENDPOINT = '0x0000000000000000000000000000000000000002';
@@ -168,6 +177,31 @@ describe('Galileo late canonical receipt recovery', () => {
   let recoveryInput: LateReceiptRecoveryInput;
   let originalBytes: Buffer;
 
+  function rewriteRecoveredPacket(journal: RecoveredFinalizationJournal, manifest: Record<string, any>): void {
+    const journalBytes = Buffer.from(`${JSON.stringify(journal, null, 2)}\n`);
+    const journalSha256 = utils.sha256(journalBytes).slice(2);
+    manifest.finalization.journalSha256 = journalSha256;
+    manifest.finalization.steps = journal.steps;
+    manifest.finalization.finalityHeadBlock = Math.max(
+      ...journal.steps.map((step) => step.finality!.observedHeadBlock)
+    );
+    manifest.recovery = journal.recovery;
+    fs.writeFileSync(recoveredJournalFile, journalBytes);
+    fs.writeFileSync(recoveredManifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  function assertRecoveredPacket(journal: RecoveredFinalizationJournal, manifest: Record<string, any>): void {
+    assertLateReceiptRecoveryLinkage({
+      manifestFile: recoveredManifestFile,
+      manifest,
+      journalFile: recoveredJournalFile,
+      journal,
+      originalJournalFile,
+      preparedFile,
+      snapshotFile,
+    });
+  }
+
   beforeEach(async () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-late-receipts-'));
     stateRoot = path.join(root, 'state');
@@ -272,6 +306,65 @@ describe('Galileo late canonical receipt recovery', () => {
     }
   });
 
+  it('passes the tracked recovery-only source authorization preflight end to end', () => {
+    const repoRoot = repositoryRoot();
+    const verified = loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot });
+    const redApprovalFile = path.join(repoRoot, 'config', 'galileo.red-testnet-approval.json');
+    const redApproval = JSON.parse(fs.readFileSync(redApprovalFile, 'utf8'));
+    assertGalileoLateReceiptRecoveryCandidateBinding(verified, {
+      approvalFile: redApprovalFile,
+      approvalSha256: sha256File(redApprovalFile),
+      approvalDigest: releaseEvidenceDigest(redApproval),
+      releaseCommit: redApproval.candidate.releaseCommit,
+      sourceTree: redApproval.candidate.sourceTree,
+      deploymentIntentId: redApproval.candidate.deploymentIntentId,
+    });
+    expect(verified.approval.recoverySource.authorizedFiles.map((record) => record.file).sort()).to.deep.equal(
+      [...AUTHORIZED_LATE_RECEIPT_RECOVERY_SOURCE_FILES].sort()
+    );
+  });
+
+  it('requires externally approved recovery metadata for the exact Red v2 deployment', () => {
+    const verified = loadAndValidateGalileoLateReceiptRecoveryApproval({ repoRoot: repositoryRoot() });
+    const approval = verified.approval;
+    const manifest = {
+      release: approval.releaseId,
+      network: { chainId: approval.chainId },
+      deploymentIntent: { deploymentId: approval.candidateApproval.deploymentIntentId },
+      deployer: approval.deployment.deployer,
+      preparation: { preparedFileSha256: approval.deployment.preparedFileSha256 },
+      finalization: {
+        planSha256: approval.deployment.finalizationPlanSha256,
+        startingNonce: approval.deployment.startingNonce,
+      },
+      source: {
+        lateReceiptRecoveryApproval: {
+          approvalFile: 'config/galileo.late-receipt-recovery-approval.json',
+          approvalSha256: verified.approvalSha256,
+          digest: verified.approvalDigest,
+          approval,
+        },
+      },
+      recovery: {
+        originalJournalSha256: approval.deployment.abandonedJournalSha256,
+        preparedFileName: approval.deployment.preparedFileName,
+        preparedFileSha256: approval.deployment.preparedFileSha256,
+        snapshotFileName: approval.deployment.snapshotFileName,
+        snapshotFileSha256: approval.deployment.snapshotFileSha256,
+        snapshotEvidenceSha256: approval.deployment.snapshotEvidenceSha256,
+        originalTerminal: approval.deployment.originalTerminal,
+        confirmationsRequired: 12,
+        noTransactionsBroadcast: true,
+      },
+      gates: { lateCanonicalReceiptRecoveryVerified: true, noRecoveryTransactionBroadcast: true },
+    } as Record<string, any>;
+    expect(() => assertGalileoLateReceiptRecoveryManifestBinding(manifest, verified)).not.to.throw();
+    delete manifest.recovery;
+    expect(() => assertGalileoLateReceiptRecoveryManifestBinding(manifest, verified)).to.throw(
+      'requires the externally approved late-receipt recovery metadata'
+    );
+  });
+
   it('recovers only the five original hashes into a new immutable packet without touching the terminal journal', async () => {
     const result = await recoverLateCanonicalReceipts(recoveryInput);
     expect(result.journal.status).to.equal('complete');
@@ -350,6 +443,46 @@ describe('Galileo late canonical receipt recovery', () => {
     fs.writeFileSync(originalJournalFile, `${JSON.stringify(terminal, null, 2)}\n`);
     await expect(recoverLateCanonicalReceipts(recoveryInput)).to.be.rejectedWith(
       'allowed only for the exact known receipt-visibility terminal outcome'
+    );
+  });
+
+  it('rejects a malformed original terminal timestamp before writing recovery output', async () => {
+    const terminal = JSON.parse(fs.readFileSync(originalJournalFile, 'utf8'));
+    terminal.terminal.recordedAt = '2026-08-23';
+    fs.writeFileSync(originalJournalFile, `${JSON.stringify(terminal, null, 2)}\n`);
+    await expect(recoverLateCanonicalReceipts(recoveryInput)).to.be.rejectedWith(
+      'original terminal recordedAt must be a canonical millisecond UTC timestamp'
+    );
+    expect(fs.existsSync(recoveredJournalFile)).to.equal(false);
+  });
+
+  it('rejects prepared/snapshot filename and snapshot-evidence linkage drift', async () => {
+    const result = await recoverLateCanonicalReceipts(recoveryInput);
+    result.journal.recovery.preparedFileName = 'wrong-prepared.json';
+    rewriteRecoveredPacket(result.journal, result.manifest);
+    expect(() => assertRecoveredPacket(result.journal, result.manifest)).to.throw('prepared filename linkage changed');
+
+    result.journal.recovery.preparedFileName = path.basename(preparedFile);
+    result.journal.recovery.snapshotEvidenceSha256 = '33'.repeat(32);
+    rewriteRecoveredPacket(result.journal, result.manifest);
+    expect(() => assertRecoveredPacket(result.journal, result.manifest)).to.throw(
+      'late-receipt recovery metadata is invalid or incomplete'
+    );
+  });
+
+  it('rejects canonical-head or confirmation counts that disagree with journal finality', async () => {
+    const result = await recoverLateCanonicalReceipts(recoveryInput);
+    result.journal.recovery.canonicalHeadBlock += 1;
+    rewriteRecoveredPacket(result.journal, result.manifest);
+    expect(() => assertRecoveredPacket(result.journal, result.manifest)).to.throw(
+      'late-receipt recovery metadata is invalid or incomplete'
+    );
+
+    result.journal.recovery.canonicalHeadBlock -= 1;
+    result.journal.recovery.receiptBlocks[0].confirmationsObserved += 1;
+    rewriteRecoveredPacket(result.journal, result.manifest);
+    expect(() => assertRecoveredPacket(result.journal, result.manifest)).to.throw(
+      'late-receipt recovery metadata is invalid or incomplete'
     );
   });
 
