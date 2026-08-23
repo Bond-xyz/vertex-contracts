@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { providers } from 'ethers';
+import { Contract, providers } from 'ethers';
+import type { Artifacts } from 'hardhat/types';
 import {
   FinalizationJournal,
   FinalizationProvider,
@@ -73,6 +74,23 @@ export type LateReceiptRecoveryInput = {
   testOnlyLockRoot?: string;
   now?: () => Date;
 };
+
+export async function readOnlyRecoveryContract(
+  artifacts: Pick<Artifacts, 'readArtifact'>,
+  contractName: string,
+  address: string,
+  provider: providers.Provider
+): Promise<Contract> {
+  if (!providers.Provider.isProvider(provider)) {
+    throw new Error(`${contractName} recovery client requires a read-only provider`);
+  }
+  const artifact = await artifacts.readArtifact(contractName);
+  const contract = new Contract(address, artifact.abi, provider);
+  if (contract.signer !== null) {
+    throw new Error(`${contractName} recovery client unexpectedly acquired a signer`);
+  }
+  return contract;
+}
 
 type AcceptedRecoveryRecord = {
   schemaVersion: 1;

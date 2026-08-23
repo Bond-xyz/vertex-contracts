@@ -54,6 +54,7 @@ import {
 } from './galileo-finalization-journal';
 import {
   LateReceiptRecoveryEvidence,
+  readOnlyRecoveryContract,
   recoverLateCanonicalReceipts,
   RecoveredFinalizationJournal,
 } from './galileo-late-receipt-recovery';
@@ -686,16 +687,38 @@ async function main(): Promise<void> {
   assertStorkObservationBlock(storkPreflight.snapshot, observationBlock);
   const products = resolveProductsWithStorkPrices(preflight.products, storkPricesByProductId(storkPreflight.snapshot));
 
-  const endpoint = await ethers.getContractAt('Endpoint', prepared.contracts.endpoint.proxy, ethers.provider);
-  const verifier = await ethers.getContractAt('Verifier', prepared.contracts.verifier.proxy, ethers.provider);
-  const clearinghouse = await ethers.getContractAt(
+  const endpoint = await readOnlyRecoveryContract(
+    artifacts,
+    'Endpoint',
+    prepared.contracts.endpoint.proxy,
+    ethers.provider
+  );
+  const verifier = await readOnlyRecoveryContract(
+    artifacts,
+    'Verifier',
+    prepared.contracts.verifier.proxy,
+    ethers.provider
+  );
+  const clearinghouse = await readOnlyRecoveryContract(
+    artifacts,
     'Clearinghouse',
     prepared.contracts.clearinghouse.proxy,
     ethers.provider
   );
-  const spotEngine = await ethers.getContractAt('SpotEngine', prepared.contracts.spotEngine.proxy, ethers.provider);
-  const perpEngine = await ethers.getContractAt('PerpEngine', prepared.contracts.perpEngine.proxy, ethers.provider);
-  const offchainExchange = await ethers.getContractAt(
+  const spotEngine = await readOnlyRecoveryContract(
+    artifacts,
+    'SpotEngine',
+    prepared.contracts.spotEngine.proxy,
+    ethers.provider
+  );
+  const perpEngine = await readOnlyRecoveryContract(
+    artifacts,
+    'PerpEngine',
+    prepared.contracts.perpEngine.proxy,
+    ethers.provider
+  );
+  const offchainExchange = await readOnlyRecoveryContract(
+    artifacts,
     'OffchainExchange',
     prepared.contracts.offchainExchange.proxy,
     ethers.provider

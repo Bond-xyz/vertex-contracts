@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { expect } from 'chai';
 import { BigNumber, providers, utils } from 'ethers';
+import { artifacts, ethers as hardhatEthers } from 'hardhat';
 import {
   deterministicSha256,
   ensureLocalReleaseStateHostIdentity,
@@ -17,6 +18,7 @@ import {
   LATE_RECEIPT_RECOVERY_KIND,
   LATE_RECEIPT_VISIBILITY_OUTCOME,
   recoverLateCanonicalReceipts,
+  readOnlyRecoveryContract,
   RecoveredFinalizationJournal,
 } from '../scripts/galileo-late-receipt-recovery';
 import {
@@ -312,6 +314,31 @@ describe('Galileo late canonical receipt recovery', () => {
       '.deploy(',
     ]) {
       expect(source).not.to.contain(forbidden);
+    }
+  });
+
+  it('constructs all six Galileo recovery clients with a provider and no signer', async () => {
+    const commandSource = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'recover-galileo-late-receipts.ts'),
+      'utf8'
+    );
+    expect(commandSource).not.to.contain('ethers.getContractAt(');
+    expect(fs.readFileSync(path.resolve(__dirname, '..', 'hardhat.config.ts'), 'utf8')).to.contain(
+      'accounts: galileoDeployerKey ? [galileoDeployerKey] : []'
+    );
+    for (const [index, contractName] of [
+      'Endpoint',
+      'Verifier',
+      'Clearinghouse',
+      'SpotEngine',
+      'PerpEngine',
+      'OffchainExchange',
+    ].entries()) {
+      const address = utils.getAddress(`0x${(index + 10).toString(16).padStart(40, '0')}`);
+      const contract = await readOnlyRecoveryContract(artifacts, contractName, address, hardhatEthers.provider);
+      expect(contract.address).to.equal(address);
+      expect(contract.provider).to.equal(hardhatEthers.provider);
+      expect(contract.signer).to.equal(null);
     }
   });
 
