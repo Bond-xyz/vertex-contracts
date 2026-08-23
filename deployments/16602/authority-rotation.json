@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "kind": "galileo_red_authority_rotation",
+  "chainId": 16602,
+  "capturedAt": "2026-08-23T05:04:03.000Z",
+  "sourceDeployment": {
+    "manifestReference": "deployments/16602/latest.recovered.local.json",
+    "manifestSha256": "bd4768a57d9d6218af5bc9a818dc81424ff915190a2cf90bbe240ffa029676a3",
+    "deployer": "0x4e36e0b89048F3508A815946030D10611641B0AF"
+  },
+  "rotation": {
+    "oldAuthority": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+    "newAuthority": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4",
+    "gasPriceWei": "4000000007",
+    "finalityConfirmationsRequired": 12,
+    "transactions": [
+      {
+        "id": "fund.new-authority",
+        "kind": "native_funding",
+        "nonce": 56,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4",
+        "valueWei": "1000000000000000000",
+        "calldata": "0x",
+        "gasLimit": "21000",
+        "gasUsed": "21000",
+        "transactionHash": "0x34145bfc20a9bc8209e4e978b2c8209e788c9c696bb3060e02e04e3a44ed5836",
+        "blockNumber": 50906412,
+        "blockHash": "0xcff43c8ebd706f7bcb9a99f01d5610ce7555e7fa3dcde664d43d6858e3d29803",
+        "status": 1
+      },
+      {
+        "id": "endpoint.set-sequencer",
+        "kind": "endpoint_set_sequencer",
+        "nonce": 57,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xb8C398B78Df988AC770790E6De5bb7881F2AC813",
+        "valueWei": "0",
+        "calldata": "0x2547fa3e000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47190",
+        "gasUsed": "37752",
+        "transactionHash": "0x1a591651ae54fd070a9ea6af20b10a33f7ffc876a33bb9ffe5a574983199cba5",
+        "blockNumber": 50906439,
+        "blockHash": "0xc3d39319860ac9fd11a44ee6ac4b1944252bc362d50b3cd89167d6a798cedf3e",
+        "status": 1
+      },
+      {
+        "id": "verifier.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 58,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0x74CEBff58091683C9a75EFB11D1E586B6b6CDDCf",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47000",
+        "gasUsed": "37600",
+        "transactionHash": "0xa514e38868b95813d63ba8544b9eb7140aa20665df4d336d58c8acc34075ec5e",
+        "blockNumber": 50906466,
+        "blockHash": "0x5720e5ce2ae16aa02356e3987f88552b61c96cdbb75384a612c1ef76d91eab91",
+        "status": 1
+      },
+      {
+        "id": "clearinghouse.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 59,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0x45C40B425fb736da2C8775612400A89827b156C1",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47000",
+        "gasUsed": "37600",
+        "transactionHash": "0x237840232afd8094323eb9dfb6e4b478c4b0d1bc2da3760d6910f8a189114059",
+        "blockNumber": 50906487,
+        "blockHash": "0x4a43ef57e6c989d4b36a938d517f1b2f86258d1a4ffd7f04fd08688da75eac06",
+        "status": 1
+      },
+      {
+        "id": "spot-engine.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 60,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xf99E5c21ff7a25063594fB8ac64CA0caDDBbaA80",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47000",
+        "gasUsed": "37600",
+        "transactionHash": "0x4bf6ead4361846a438d21c24d2ef19ed9b1ac7b121b5a26fe70a06f770b32dbd",
+        "blockNumber": 50906513,
+        "blockHash": "0x7c5e046a5adf9820bab9a53bfa5b2bb93cc464e18864c4e0ee469a9ecd3d3512",
+        "status": 1
+      },
+      {
+        "id": "perp-engine.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 61,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xcce2dA1907589779f5326a0F5Ae935999e8AD75b",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47000",
+        "gasUsed": "37600",
+        "transactionHash": "0x4740ebf6ed092ed37cf2307177b90d5f3091c73070f356645d97c34bcb6c2d46",
+        "blockNumber": 50906541,
+        "blockHash": "0x40390bd28cfba77cf2e5d492637c39d3fd37073c85887abd6ea9f31c3ee5cee6",
+        "status": 1
+      },
+      {
+        "id": "offchain-exchange.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 62,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0x5B83fEf0FFB74856439A425a98EDF0ae65476909",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "47000",
+        "gasUsed": "37600",
+        "transactionHash": "0xbf093c979f32d4ac915556a0cc88a94982343b744ee8ed976ea9c82cc3a81b74",
+        "blockNumber": 50906558,
+        "blockHash": "0x8bc9d42fd1063c55498fa75c09c0a1bd4b9d1672c8f1a1461218007c92789f46",
+        "status": 1
+      },
+      {
+        "id": "endpoint.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 63,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xb8C398B78Df988AC770790E6De5bb7881F2AC813",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "46674",
+        "gasUsed": "37339",
+        "transactionHash": "0x8ee90de8954747ad6c89e22f96a46a18b67a66ce17578a2e6b5bb53ab0fdb5f3",
+        "blockNumber": 50906577,
+        "blockHash": "0x07272219340c097e5657ebd897159770ba2eb64783de45c681b438c06b68c4c9",
+        "status": 1
+      },
+      {
+        "id": "proxy-admin.transfer-ownership",
+        "kind": "transfer_ownership",
+        "nonce": 64,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E",
+        "valueWei": "0",
+        "calldata": "0xf2fde38b000000000000000000000000e31139d7bee3ae76c7839dcc1849b2c6ac18f7e4",
+        "gasLimit": "37754",
+        "gasUsed": "30203",
+        "transactionHash": "0xa4e5c36de78b27e3e503e06311cf0fb9ec9ca64489a700ad8af09cd8551080d5",
+        "blockNumber": 50906596,
+        "blockHash": "0x27d9623cce70d07e084d5b285392f8f425e6278674ea7c2abf12a489ef7d07c3",
+        "status": 1
+      },
+      {
+        "id": "retire.old-authority-balance",
+        "kind": "native_sweep",
+        "nonce": 65,
+        "from": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+        "to": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4",
+        "valueWei": "18704548399482959700",
+        "calldata": "0x",
+        "gasLimit": "21000",
+        "gasUsed": "21000",
+        "transactionHash": "0xa9c0f17ad2afb815d386012715fa52e2fecf3f13e29430535530cc64f8516dcc",
+        "blockNumber": 50906628,
+        "blockHash": "0xd5e67804af06a1078d6e1758864a58cf254f7c920bae874d281ba147f28c8dc9",
+        "status": 1
+      }
+    ]
+  },
+  "postState": {
+    "observedBlockNumber": 50906727,
+    "observedBlockHash": "0x9c63b773e22b361a6942d5f1edf83ec0e059d200777f60e6ff037f2ef8d7e69c",
+    "endpointSequencer": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4",
+    "owners": {
+      "verifier": {
+        "address": "0x74CEBff58091683C9a75EFB11D1E586B6b6CDDCf",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "endpoint": {
+        "address": "0xb8C398B78Df988AC770790E6De5bb7881F2AC813",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "clearinghouse": {
+        "address": "0x45C40B425fb736da2C8775612400A89827b156C1",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "spotEngine": {
+        "address": "0xf99E5c21ff7a25063594fB8ac64CA0caDDBbaA80",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "perpEngine": {
+        "address": "0xcce2dA1907589779f5326a0F5Ae935999e8AD75b",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "offchainExchange": {
+        "address": "0x5B83fEf0FFB74856439A425a98EDF0ae65476909",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      },
+      "proxyAdmin": {
+        "address": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E",
+        "owner": "0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4"
+      }
+    },
+    "proxies": [
+      {
+        "name": "verifier",
+        "proxy": "0x74CEBff58091683C9a75EFB11D1E586B6b6CDDCf",
+        "implementation": "0x768CD0C473c64eb9709AAF769eEC291f27fc353A",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      },
+      {
+        "name": "endpoint",
+        "proxy": "0xb8C398B78Df988AC770790E6De5bb7881F2AC813",
+        "implementation": "0x68F246329a6d064A954D1d02b9979CF820CEE2A5",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      },
+      {
+        "name": "clearinghouse",
+        "proxy": "0x45C40B425fb736da2C8775612400A89827b156C1",
+        "implementation": "0x843365397cd165b0bE281858bc100Cf68AcEe396",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      },
+      {
+        "name": "spotEngine",
+        "proxy": "0xf99E5c21ff7a25063594fB8ac64CA0caDDBbaA80",
+        "implementation": "0x298B61A94310c4827eB53002F77D4ff3734e66a2",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      },
+      {
+        "name": "perpEngine",
+        "proxy": "0xcce2dA1907589779f5326a0F5Ae935999e8AD75b",
+        "implementation": "0x45cB70B7f7656831890692f5822399eF8f9d650F",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      },
+      {
+        "name": "offchainExchange",
+        "proxy": "0x5B83fEf0FFB74856439A425a98EDF0ae65476909",
+        "implementation": "0x4722b79d7e3440Cc4f6f81188C30494A50410Aed",
+        "admin": "0x9fA10f3a75657F3Cf12C7f9F7628c91F852c860E"
+      }
+    ],
+    "verifierQuorum": {
+      "signerCount": 3,
+      "signerBitmask": 7,
+      "publicKeysSha256": "1f73f9270793b1e6b299fa1a158afa527ae114a23ff2b1dbdc9b822f6f910a2a",
+      "publicKeys": [
+        {
+          "x": "0x795fdca659e3581aa2d538fa3057d0603470b59b39340a948d6fcc66831524d5",
+          "y": "0xf01c7656cac501ea1ec376a722603bec12772fac5be3fddca6e4845ea1c07fd2"
+        },
+        {
+          "x": "0x734b68e13d8ba7d6df89e1736330888e0a417ed83694629befd26456397ead65",
+          "y": "0x015e4055c288dcc5d4262c7c64f3275cf7e6b1a8200a0dd93c19e68b27e275ca"
+        },
+        {
+          "x": "0x857c044ed016f224146a65a00d20ab6ba35d3735f758ef3df96ecf1a6a72feff",
+          "y": "0x018cd92f5a6e031a7fe263d9de7b366cb8bea2794dbabc40232ee94c81a2db2f"
+        },
+        {
+          "x": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "y": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "x": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "y": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "x": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "y": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "x": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "y": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "x": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "y": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    }
+  }
+}
