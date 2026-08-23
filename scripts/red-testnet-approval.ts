@@ -43,6 +43,11 @@ import {
   collectGalileoStaticReleasePolicy,
   GalileoStaticReleasePolicy,
 } from './stork-deployment-snapshot';
+import {
+  assertGalileoLateReceiptRecoveryCandidateBinding,
+  loadAndValidateGalileoLateReceiptRecoveryApproval,
+  VerifiedGalileoLateReceiptRecoveryApproval,
+} from './galileo-late-receipt-recovery-approval';
 
 export const TRACKED_RED_GALILEO_APPROVAL = 'config/galileo.red-testnet-approval.json';
 export const RED_TESTNET_APPROVAL_SCHEMA_VERSION = 1;
@@ -122,6 +127,20 @@ export type VerifiedRedTestnetReleaseEvidence = {
   verifierConfig: VerifierConfig;
   verifierConfigSha256: string;
   deploymentIntent: GalileoDeploymentIntent;
+};
+
+export type VerifiedRedTestnetRecoveryEvidence = VerifiedRedTestnetReleaseEvidence & {
+  lateReceiptRecoveryApproval: VerifiedGalileoLateReceiptRecoveryApproval;
+};
+
+export type RedTestnetReleaseEvidenceInput = {
+  artifacts: Artifacts;
+  productsFile: string;
+  productReviewFile: string;
+  verifierFile: string;
+  deploymentIntentFile: string;
+  approvalFile?: string;
+  repoRoot?: string;
 };
 
 const REQUIRED_CI_CHECKS = ['compile', 'contract-interface-diff', 'release-tests', 'gitleaks'];
@@ -338,15 +357,10 @@ export async function createRedTestnetApprovalDraft(input: {
   };
 }
 
-export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
-  artifacts: Artifacts;
-  productsFile: string;
-  productReviewFile: string;
-  verifierFile: string;
-  deploymentIntentFile: string;
-  approvalFile?: string;
-  repoRoot?: string;
-}): Promise<VerifiedRedTestnetReleaseEvidence> {
+async function collectAndVerifyRedTestnetReleaseEvidenceInternal(
+  input: RedTestnetReleaseEvidenceInput,
+  recoveryApproval?: VerifiedGalileoLateReceiptRecoveryApproval
+): Promise<VerifiedRedTestnetReleaseEvidence> {
   const repoRoot = input.repoRoot || repositoryRoot();
   const productsFile = requireTrackedReleaseFile(repoRoot, input.productsFile, TRACKED_GALILEO_PRODUCTS, 'products');
   const productReviewFile = requireTrackedReleaseFile(
@@ -372,7 +386,12 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
   }
   const approvedAt = Date.parse(approval.approvedAt);
   if (!Number.isFinite(approvedAt)) throw new Error('tracked Red approval timestamp is invalid');
-  const source = loadApprovedCandidateSource(repoRoot, approval);
+  const source = recoveryApproval
+    ? {
+        releaseCommit: recoveryApproval.approval.candidateApproval.releaseCommit.toLowerCase(),
+        sourceTree: recoveryApproval.approval.candidateApproval.sourceTree.toLowerCase(),
+      }
+    : loadApprovedCandidateSource(repoRoot, approval);
   validateCiEvidence(approval.deterministicCi, source.releaseCommit);
   validateAgentReviews(approval.independentAgentReviews, source.releaseCommit);
   const build = await collectReleaseBuildEvidence(input.artifacts);
@@ -435,6 +454,32 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
     verifierConfigSha256,
     deploymentIntent,
   };
+}
+
+export async function collectAndVerifyRedTestnetReleaseEvidence(
+  input: RedTestnetReleaseEvidenceInput
+): Promise<VerifiedRedTestnetReleaseEvidence> {
+  return collectAndVerifyRedTestnetReleaseEvidenceInternal(input);
+}
+
+export async function collectAndVerifyRedTestnetRecoveryEvidence(
+  input: RedTestnetReleaseEvidenceInput & { recoveryApprovalFile?: string }
+): Promise<VerifiedRedTestnetRecoveryEvidence> {
+  const repoRoot = input.repoRoot || repositoryRoot();
+  const lateReceiptRecoveryApproval = loadAndValidateGalileoLateReceiptRecoveryApproval({
+    repoRoot,
+    approvalFile: input.recoveryApprovalFile,
+  });
+  const evidence = await collectAndVerifyRedTestnetReleaseEvidenceInternal(input, lateReceiptRecoveryApproval);
+  assertGalileoLateReceiptRecoveryCandidateBinding(lateReceiptRecoveryApproval, {
+    approvalFile: evidence.approvalFile,
+    approvalSha256: evidence.approvalSha256,
+    approvalDigest: evidence.approvalDigest,
+    releaseCommit: evidence.source.releaseCommit,
+    sourceTree: evidence.source.sourceTree,
+    deploymentIntentId: evidence.deploymentIntent.deploymentId,
+  });
+  return { ...evidence, lateReceiptRecoveryApproval };
 }
 
 export function assertSameVerifiedRedTestnetReleaseEvidence(

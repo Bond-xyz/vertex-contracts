@@ -59,7 +59,7 @@ export type FinalizationJournal = {
   terminal?: { stepId: string; outcome: string; recordedAt: string };
 };
 
-type FinalizationProvider = Pick<
+export type FinalizationProvider = Pick<
   providers.Provider,
   | 'getBlockNumber'
   | 'getBlockWithTransactions'
@@ -1073,16 +1073,25 @@ function validateJournal(
   }
 }
 
+export function validateFinalizationJournalValue(
+  file: string,
+  journal: FinalizationJournal,
+  expected: FinalizationRunInput['expected'],
+  options: JournalValidationOptions = {}
+): void {
+  if (options.requireRuntimeOwnership) {
+    requireReleaseStateHostIdentity(expected.releaseStateHostIdentity, options);
+  }
+  validateJournal(file, journal, expected, options);
+}
+
 export function loadAndValidateFinalizationJournal(
   file: string,
   expected: FinalizationRunInput['expected'],
   options: JournalValidationOptions = {}
 ): FinalizationJournal {
-  if (options.requireRuntimeOwnership) {
-    requireReleaseStateHostIdentity(expected.releaseStateHostIdentity, options);
-  }
   const journal = JSON.parse(fs.readFileSync(file, 'utf8')) as FinalizationJournal;
-  validateJournal(file, journal, expected, options);
+  validateFinalizationJournalValue(file, journal, expected, options);
   return journal;
 }
 
