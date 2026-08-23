@@ -29,11 +29,11 @@ if (galileoChainId !== 16602) {
 }
 
 const networks: HardhatUserConfig['networks'] = {};
-if (galileoRpcUrl && galileoDeployerKey) {
+if (galileoRpcUrl) {
   networks.galileo = {
     url: galileoRpcUrl,
     chainId: galileoChainId,
-    accounts: [galileoDeployerKey],
+    accounts: galileoDeployerKey ? [galileoDeployerKey] : [],
     ...galileoHardhatFeeConfig(),
     timeout: 120000,
   };

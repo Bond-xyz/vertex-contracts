@@ -50,6 +50,7 @@ import {
   resolvePortableArtifactReference,
   verifyCanonicalFinalizationEvidence,
 } from './galileo-finalization-journal';
+import { assertLateReceiptRecoveryLinkage, RecoveredFinalizationJournal } from './galileo-late-receipt-recovery';
 
 function sameNumberish(actual: unknown, expected: unknown): boolean {
   try {
@@ -372,6 +373,34 @@ async function main() {
     finalityConfirmations: 12,
     steps: finalizationSteps,
   });
+  if ((finalizationJournal as RecoveredFinalizationJournal).recovery) {
+    const recovered = finalizationJournal as RecoveredFinalizationJournal;
+    const originalJournalFile = resolvePortableArtifactReference(
+      finalizationJournalFile,
+      recovered.recovery.originalJournalReference
+    );
+    const preparedFile = path.resolve(
+      process.env.PERPDEX_PREPARED_DEPLOYMENT || './deployments/16602/prepared.local.json'
+    );
+    const snapshotFile = path.resolve(
+      process.env.PERPDEX_STORK_SNAPSHOT_FILE || './config/galileo.stork-deployment-snapshot.local.json'
+    );
+    if (
+      manifest.gates?.lateCanonicalReceiptRecoveryVerified !== true ||
+      manifest.gates?.noRecoveryTransactionBroadcast !== true
+    ) {
+      throw new Error('recovered deployment manifest does not assert the read-only late-receipt recovery gates');
+    }
+    assertLateReceiptRecoveryLinkage({
+      manifestFile,
+      manifest,
+      journalFile: finalizationJournalFile,
+      journal: recovered,
+      originalJournalFile,
+      preparedFile,
+      snapshotFile,
+    });
+  }
   if (
     finalizationJournal.status !== 'complete' ||
     finalizationJournal.planSha256 !== manifest.finalization.planSha256 ||
