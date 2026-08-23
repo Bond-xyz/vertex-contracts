@@ -22,7 +22,8 @@
     "deploy:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/deploy-galileo.ts --network galileo",
     "recover:galileo:late-receipts": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/recover-galileo-late-receipts.ts --network galileo",
     "verify:galileo:authority-rotation": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/verify-galileo-authority-rotation.ts",
-    "verify:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/verify-galileo-deployment.ts --network galileo"
+    "verify:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run scripts/verify-galileo-deployment.ts --network galileo",
+    "bootstrap:galileo:red-mm": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/bootstrap-red-mm-wallets.ts"
   },
   "engines": {
     "node": ">=16"
