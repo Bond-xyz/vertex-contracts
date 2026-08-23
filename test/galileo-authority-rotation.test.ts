@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { expect } from 'chai';
 import { BigNumber, providers, utils } from 'ethers';
 import {
@@ -9,6 +11,7 @@ import {
   NEW_AUTHORITY,
   OLD_AUTHORITY,
   ReadOnlyAuthorityProvider,
+  TRACKED_RECOVERED_DEPLOYMENT_MANIFEST,
   validateAuthorityRotationEvidence,
   verifyAuthorityRotationEvidence,
 } from '../scripts/galileo-authority-rotation';
@@ -23,10 +26,13 @@ const ADMIN_SLOT = '0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b
 
 type Drift = {
   chainId?: number;
+  rpcChainId?: number;
   latestOwner?: string;
   latestSequencer?: boolean;
   latestProxyImplementation?: string;
   latestVerifierPoint?: boolean;
+  latestRetiredBalance?: boolean;
+  latestRetiredNonce?: boolean;
   receiptStatus?: boolean;
 };
 
@@ -62,6 +68,10 @@ function fakeProvider(evidence: AuthorityRotationEvidence, drift: Drift = {}): R
   const headBlock = evidence.postState.observedBlockNumber + 100;
 
   return {
+    send: async (method: string) => {
+      if (method !== 'eth_chainId') throw new Error('unexpected JSON-RPC method');
+      return utils.hexValue(drift.rpcChainId || 16602);
+    },
     getNetwork: async () => ({ chainId: drift.chainId || 16602, name: 'galileo' }),
     getBlockNumber: async () => headBlock,
     getBlock: async (blockNumber: providers.BlockTag) => {
@@ -111,6 +121,10 @@ function fakeProvider(evidence: AuthorityRotationEvidence, drift: Drift = {}): R
         logs,
       } as providers.TransactionReceipt;
     },
+    getBalance: async (_address: string, blockTag?: providers.BlockTag) =>
+      BigNumber.from(isLatest(blockTag) && drift.latestRetiredBalance ? 1 : 0),
+    getTransactionCount: async (_address: string, blockTag?: providers.BlockTag) =>
+      isLatest(blockTag) && drift.latestRetiredNonce ? 67 : 66,
     getStorageAt: async (address: string, position: BigNumberish, blockTag?: providers.BlockTag) => {
       const proxy = proxyByAddress.get(address.toLowerCase());
       if (!proxy) throw new Error('unexpected storage target');
@@ -168,6 +182,23 @@ describe('Galileo Red authority rotation evidence', () => {
     );
   });
 
+  it('fails closed when the tracked source manifest is missing or mutated', () => {
+    const digest = crypto.createHash('sha256').update(trackedBytes()).digest('hex');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'galileo-authority-source-'));
+    const missing = path.join(root, 'missing.json');
+    expect(() => loadTrackedAuthorityRotationEvidence(GALILEO_AUTHORITY_ROTATION_EVIDENCE, digest, missing)).to.throw(
+      'tracked recovered deployment manifest is missing or unreadable'
+    );
+    const mutated = path.join(root, 'mutated.json');
+    fs.writeFileSync(
+      mutated,
+      Buffer.concat([fs.readFileSync(TRACKED_RECOVERED_DEPLOYMENT_MANIFEST), Buffer.from('\n')])
+    );
+    expect(() => loadTrackedAuthorityRotationEvidence(GALILEO_AUTHORITY_ROTATION_EVIDENCE, digest, mutated)).to.throw(
+      'tracked recovered deployment manifest SHA-256 mismatch'
+    );
+  });
+
   it('verifies the canonical receipts, authority, proxy slots, and verifier quorum', async () => {
     const evidence = trackedEvidence();
     const result = await verifyAuthorityRotationEvidence(fakeProvider(evidence), evidence);
@@ -183,6 +214,13 @@ describe('Galileo Red authority rotation evidence', () => {
         evidence
       )
     ).to.be.rejectedWith('live state endpoint owner drift');
+  });
+
+  it('fails closed when raw eth_chainId disagrees with the configured network', async () => {
+    const evidence = trackedEvidence();
+    await expect(
+      verifyAuthorityRotationEvidence(fakeProvider(evidence, { rpcChainId: 1 }), evidence)
+    ).to.be.rejectedWith('authority rotation RPC is chain 1, not 16602');
   });
 
   it('fails closed when the live Endpoint sequencer drifts', async () => {
@@ -204,6 +242,20 @@ describe('Galileo Red authority rotation evidence', () => {
     await expect(
       verifyAuthorityRotationEvidence(fakeProvider(evidence, { latestVerifierPoint: true }), evidence)
     ).to.be.rejectedWith('live state Verifier quorum drift');
+  });
+
+  it('fails closed when the retired authority receives funds again', async () => {
+    const evidence = trackedEvidence();
+    await expect(
+      verifyAuthorityRotationEvidence(fakeProvider(evidence, { latestRetiredBalance: true }), evidence)
+    ).to.be.rejectedWith('live state retired authority balance is not zero');
+  });
+
+  it('fails closed when the retired authority nonce advances', async () => {
+    const evidence = trackedEvidence();
+    await expect(
+      verifyAuthorityRotationEvidence(fakeProvider(evidence, { latestRetiredNonce: true }), evidence)
+    ).to.be.rejectedWith('live state retired authority nonce drift');
   });
 
   it('fails closed when a canonical rotation receipt is unsuccessful', async () => {

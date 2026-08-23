@@ -12,9 +12,16 @@ export const GALILEO_AUTHORITY_ROTATION_EVIDENCE = path.resolve(
   '16602',
   'authority-rotation.json'
 );
+export const TRACKED_RECOVERED_DEPLOYMENT_MANIFEST = path.resolve(
+  __dirname,
+  '..',
+  'deployments',
+  '16602',
+  'contract-manifest.schema-v9.json'
+);
 export const EXPECTED_RECOVERED_MANIFEST_SHA256 = 'bd4768a57d9d6218af5bc9a818dc81424ff915190a2cf90bbe240ffa029676a3';
 export const EXPECTED_AUTHORITY_ROTATION_EVIDENCE_SHA256 =
-  'b36a35a4db40af0653fd18f1b395014d6152271bf0fe5c19c4c1731f62dbb1d2';
+  '9cbee5659488d1c942ce345122eb0eed0276e47eb6c0b7e212ffe3b00cdb4c8d';
 
 export const OLD_AUTHORITY = '0x4e36e0b89048F3508A815946030D10611641B0AF';
 export const NEW_AUTHORITY = '0xE31139d7BEe3AE76C7839dCc1849B2C6Ac18f7E4';
@@ -91,8 +98,18 @@ export type AuthorityRotationEvidence = {
 
 export type ReadOnlyAuthorityProvider = Pick<
   providers.Provider,
-  'getNetwork' | 'getBlockNumber' | 'getBlock' | 'getTransaction' | 'getTransactionReceipt' | 'getStorageAt' | 'call'
->;
+  | 'getNetwork'
+  | 'getBlockNumber'
+  | 'getBlock'
+  | 'getTransaction'
+  | 'getTransactionReceipt'
+  | 'getStorageAt'
+  | 'getBalance'
+  | 'getTransactionCount'
+  | 'call'
+> & {
+  send(method: string, params: unknown[]): Promise<unknown>;
+};
 
 const expectedOwners: Record<string, string> = {
   verifier: '0x74CEBff58091683C9a75EFB11D1E586B6b6CDDCf',
@@ -280,7 +297,7 @@ export function validateAuthorityRotationEvidence(value: unknown): AuthorityRota
   exactTimestamp(evidence.capturedAt);
   const source = requireObject(evidence.sourceDeployment, 'source deployment');
   if (
-    source.manifestReference !== 'deployments/16602/latest.recovered.local.json' ||
+    source.manifestReference !== 'deployments/16602/contract-manifest.schema-v9.json' ||
     source.manifestSha256 !== EXPECTED_RECOVERED_MANIFEST_SHA256
   ) {
     throw new Error('authority rotation source manifest mismatch');
@@ -361,13 +378,39 @@ export function validateAuthorityRotationEvidence(value: unknown): AuthorityRota
 
 export function loadTrackedAuthorityRotationEvidence(
   file = GALILEO_AUTHORITY_ROTATION_EVIDENCE,
-  expectedSha256 = EXPECTED_AUTHORITY_ROTATION_EVIDENCE_SHA256
+  expectedSha256 = EXPECTED_AUTHORITY_ROTATION_EVIDENCE_SHA256,
+  sourceManifestFile = TRACKED_RECOVERED_DEPLOYMENT_MANIFEST
 ): AuthorityRotationEvidence {
   const bytes = fs.readFileSync(file);
   if (!/^[0-9a-f]{64}$/.test(expectedSha256) || sha256(bytes) !== expectedSha256) {
     throw new Error('tracked authority rotation evidence SHA-256 mismatch');
   }
-  return validateAuthorityRotationEvidence(JSON.parse(bytes.toString('utf8')));
+  const evidence = validateAuthorityRotationEvidence(JSON.parse(bytes.toString('utf8')));
+  let sourceManifestBytes: Buffer;
+  try {
+    sourceManifestBytes = fs.readFileSync(sourceManifestFile);
+  } catch {
+    throw new Error('tracked recovered deployment manifest is missing or unreadable');
+  }
+  if (sha256(sourceManifestBytes) !== evidence.sourceDeployment.manifestSha256) {
+    throw new Error('tracked recovered deployment manifest SHA-256 mismatch');
+  }
+  let sourceManifest: Record<string, unknown>;
+  try {
+    sourceManifest = requireObject(JSON.parse(sourceManifestBytes.toString('utf8')), 'recovered deployment manifest');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('recovered deployment manifest')) throw error;
+    throw new Error('tracked recovered deployment manifest is not valid JSON');
+  }
+  if (
+    sourceManifest.schemaVersion !== 9 ||
+    requireObject(sourceManifest.network, 'recovered deployment network').chainId !== 16602
+  ) {
+    throw new Error('tracked recovered deployment manifest identity mismatch');
+  }
+  sameAddress(sourceManifest.deployer, OLD_AUTHORITY, 'recovered deployment deployer');
+  sameAddress(sourceManifest.sequencer, OLD_AUTHORITY, 'recovered deployment original sequencer');
+  return evidence;
 }
 
 function addressTopic(address: string): string {
@@ -463,11 +506,37 @@ async function verifyPostStateAt(
   }
 }
 
+async function verifyRetiredAuthorityAt(
+  provider: ReadOnlyAuthorityProvider,
+  blockTag: providers.BlockTag,
+  label: string
+): Promise<void> {
+  const balance = await provider.getBalance(OLD_AUTHORITY, blockTag);
+  if (!balance.isZero()) throw new Error(`${label} retired authority balance is not zero`);
+  const nonce = await provider.getTransactionCount(OLD_AUTHORITY, blockTag);
+  if (nonce !== 66) throw new Error(`${label} retired authority nonce drift`);
+}
+
+function parseRpcChainId(value: unknown): number {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) {
+    throw new Error('eth_chainId returned a non-canonical value');
+  }
+  const chainId = BigNumber.from(value);
+  if (chainId.gt(BigNumber.from(Number.MAX_SAFE_INTEGER.toString()))) {
+    throw new Error('eth_chainId exceeds a safe integer');
+  }
+  return chainId.toNumber();
+}
+
 export async function verifyAuthorityRotationEvidence(
   provider: ReadOnlyAuthorityProvider,
   evidenceInput: unknown
 ): Promise<{ headBlock: number; transactionCount: number; authority: string }> {
   const evidence = validateAuthorityRotationEvidence(evidenceInput);
+  const rpcChainId = parseRpcChainId(await provider.send('eth_chainId', []));
+  if (rpcChainId !== GALILEO_AUTHORITY_ROTATION_CHAIN_ID) {
+    throw new Error(`authority rotation RPC is chain ${rpcChainId}, not 16602`);
+  }
   const network = await provider.getNetwork();
   if (network.chainId !== GALILEO_AUTHORITY_ROTATION_CHAIN_ID) {
     throw new Error(`authority rotation evidence is for chain 16602, not ${network.chainId}`);
@@ -529,7 +598,9 @@ export async function verifyAuthorityRotationEvidence(
     }
   }
   await verifyPostStateAt(provider, evidence, evidence.postState.observedBlockNumber, 'recorded post-state');
+  await verifyRetiredAuthorityAt(provider, evidence.postState.observedBlockNumber, 'recorded post-state');
   await verifyPostStateAt(provider, evidence, 'latest', 'live state');
+  await verifyRetiredAuthorityAt(provider, 'latest', 'live state');
   return {
     headBlock,
     transactionCount: evidence.rotation.transactions.length,

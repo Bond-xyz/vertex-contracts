@@ -4,7 +4,7 @@
   "chainId": 16602,
   "capturedAt": "2026-08-23T05:04:03.000Z",
   "sourceDeployment": {
-    "manifestReference": "deployments/16602/latest.recovered.local.json",
+    "manifestReference": "deployments/16602/contract-manifest.schema-v9.json",
     "manifestSha256": "bd4768a57d9d6218af5bc9a818dc81424ff915190a2cf90bbe240ffa029676a3",
     "deployer": "0x4e36e0b89048F3508A815946030D10611641B0AF"
   },
