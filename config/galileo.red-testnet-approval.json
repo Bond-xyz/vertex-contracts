@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "approvalId": "bond-perpdex-galileo-red-testnet-release",
+  "scope": "galileo_testnet_only",
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-galileo-audited-base",
+  "chainId": 16602,
+  "collateral": {
+    "address": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "approver": {
+    "name": "Red",
+    "role": "product_and_release_owner"
+  },
+  "decision": "approve_exact_galileo_testnet_release",
+  "approvedAt": "2026-08-23T03:07:10Z",
+  "mainnetExternalReviewWaived": false,
+  "candidate": {
+    "releaseCommit": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
+    "sourceTree": "41ab8f6759efd4f29cbbd8b782aa7c8aa703adf6",
+    "buildEvidenceSha256": "c29a2990881e802690394c5b1ab3e84ae53cabc5e034b415246f0915caa50758",
+    "productConfigSha256": "48f01b86d3ac42b444419fa7b4f77bf3b7aa4a9c53eef15f89e409c04298e8f2",
+    "productReviewSha256": "3c7d3894d5a0494f974d4659ed8e5b06dd18a61eaddc8eb99b3fac546a31b4a0",
+    "backendBetaCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
+    "storkPolicySha256": "48a0754ea11410e6f496f66a8786ef685c74e3d05c0e12d4ddf068dfe4b72560",
+    "collateralProvenanceSha256": "1e750f6d2af41e591fa0ff2f099fe80d033cbcd454f57b449ea406098454ba60",
+    "verifierConfigSha256": "6a600996c3dce12190d6fecd0c0d43e638ea50f49a6a2730b222433d803e99b6",
+    "verifierSignerCount": 3,
+    "verifierSignerBitmask": 7,
+    "deploymentIntentId": "0x1eb84a227c204abe6c7dd5f418b7c8ecd5eaecb98b3e8086af77f3357d5f524f",
+    "deploymentNonce": "20260823030531",
+    "expiresAt": 1787627131,
+    "deployer": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+    "sequencer": "0x4e36e0b89048F3508A815946030D10611641B0AF",
+    "firstTransactionNonce": 27,
+    "expectedFirstContract": "0xe6cbddFd0C6f8B77fD04FcEA09094024fE4f025e"
+  },
+  "deterministicCi": {
+    "provider": "github_actions",
+    "repository": "Bond-xyz/vertex-contracts",
+    "workflow": "Galileo deterministic release gate",
+    "runUrl": "https://github.com/Bond-xyz/vertex-contracts/actions/runs/29263106379",
+    "headSha": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
+    "conclusion": "success",
+    "checks": [
+      "compile",
+      "contract-interface-diff",
+      "product-vector-review",
+      "release-tests",
+      "gitleaks"
+    ]
+  },
+  "independentAgentReviews": [
+    {
+      "agent": "Codex independent Red contract deployment reviewer",
+      "reviewedCommit": "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
+      "conclusion": "approved",
+      "evidenceSha256": "8a12507b8d8846fca02af77dd7e5c1c8a4891d77a0ec14834e1bbdfb90a69455",
+      "summary": "Exact candidate approved for a separate Galileo testnet graph. Deterministic compilation and contract-interface diff passed, the release suite passed 93 of 93 tests, the canonical USDC.e and product IDs 2, 4, 6, and 8 remain pinned, and the planned 29-transaction deployment uses a fresh Red-only nonce-zero deployer, sequencer, and three-key verifier quorum without touching the shared testnet graph."
+    }
+  ]
+}
