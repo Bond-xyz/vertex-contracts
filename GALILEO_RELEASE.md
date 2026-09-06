@@ -6,6 +6,9 @@ This branch starts at audited Vertex V2 commit `6d5df597afe4eb16c6131a85f45322e0
 
 1. Restore the `Version.sol` implementation omitted by the published audited snapshot so the source compiles.
 2. Re-enable `OffchainExchange` EIP-712 order-signature enforcement.
+   The implementation also answers `orderSignaturesEnforced() -> true`
+   (selector `0x3e6f0787`), the constant readback Bond settlement proves
+   on-chain at start-up (`bond-perpdex` #302) before it submits a batch.
 3. Emit `DepositCollateralWithReferral`, which Bond settlement indexes for deposit provenance.
 4. Deploy one non-custodial `VirtualBook` marker per product to prevent cross-market signature replay.
 5. Pin product zero to the existing Galileo USDC.e and restrict collateral custody to exact quote-token transfers.

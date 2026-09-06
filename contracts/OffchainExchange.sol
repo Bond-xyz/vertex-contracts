@@ -870,6 +870,17 @@ contract OffchainExchange is
         feeRates[user][productId] = FeeRates(makerRateX18, takerRateX18, 1);
     }
 
+    /// @notice Settlement start-up gate readback (Bond bond-perpdex #302).
+    /// Order-signature enforcement in this release is unconditional:
+    /// `_validateOrder` always runs `_checkSignature` for normal orders, so
+    /// the readback is a constant. It exists so the settlement service can
+    /// prove the deployed implementation on-chain instead of trusting a
+    /// manifest; a pre-readback implementation reverts on this selector and
+    /// is refused at start-up.
+    function orderSignaturesEnforced() external pure returns (bool) {
+        return true;
+    }
+
     function getVirtualBook(uint32 productId) external view returns (address) {
         return virtualBookContract[productId];
     }

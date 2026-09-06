@@ -170,7 +170,13 @@ export async function collectContractInterfaceDiff() {
     'Clearinghouse appended storage'
   );
 
-  assertExact(contracts.offchainExchange.functions, { added: [], removed: [] }, 'OffchainExchange function ABI');
+  assertExact(
+    contracts.offchainExchange.functions,
+    // Reviewed delta: the settlement start-up gate readback (bond-perpdex
+    // #302). Pure constant `true`; enforcement itself is unconditional.
+    { added: ['orderSignaturesEnforced()'], removed: [] },
+    'OffchainExchange function ABI'
+  );
   assertExact(contracts.offchainExchange.events, { added: [], removed: [] }, 'OffchainExchange event ABI');
   assertExact(
     contracts.offchainExchange.errors,
