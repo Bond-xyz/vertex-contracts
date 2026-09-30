@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "kind": "carthage-dedicated-galileo-set",
+  "source": {
+    "repository": "Bond-xyz/vertex-contracts",
+    "branch": "bond/galileo-refork",
+    "commit": "d3010540c8d18d60a691df2bd75f401582c9eb86",
+    "tree": "f82365dadf1768c6ee20876950fd04f34c8d2a3c",
+    "auditedBaseCommit": "6d5df597afe4eb16c6131a85f45322e0954b9e94",
+    "auditedBaseTag": "vertex-v2-ottersec-a06f33",
+    "path": "contracts",
+    "solc": "0.8.13",
+    "optimizerRuns": 200
+  },
+  "network": {"name": "0G Galileo Testnet", "chainId": 16602},
+  "deployer": "0xd9Fc78DA656F15f9418b7817B2070Ae10Bb53C77",
+  "sequencer": "0xA54Eb7eBC07ec22Be83752B9D9c14a7f9502C010",
+  "sequencerUsesDeployer": false,
+  "quoteToken": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+  "transactions": {"firstNonce": 0, "count": 29},
+  "gasSpentOg": "0.139481404244092457",
+  "contracts": {
+    "sanctions": {"address": "0x01f192e97EEdb3C1fEc69218Cf7Db4B7971EAbef", "deploymentBlock": 57613109, "deploymentTx": "0x56b0442b4570d5e859cb0f82508615d5a410bf01eeebfd51ba4c3bdf275cfba5", "runtimeCodeHash": "0xe69157e031f3e360f4c8a84f84ab3d05380244547389b7ba34c4a235e56f8d8b"},
+    "clearinghouseLiq": {"address": "0x5B3E601aBC41837C1B5502fCab853Ef9732EC825", "deploymentBlock": 57613125, "deploymentTx": "0xdbdc65f29e13b68d609c97b2e26f11997bbae03f8969119f9f5fc9bcb5edf768", "runtimeCodeHash": "0x71e258fa29d04851ca8aea2182e34581ee55418f0d3f6b9e08e2f0a99b8e5bf7"},
+    "verifier": {"proxy": "0x6bA6Cf6992C80ce6957a3884C25511810ec815ae", "implementation": "0x4Aa2BD54215114077D7f3349C28EB7B92d0288C0", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613188, "deploymentTx": "0x9821fe31169ab8a4fb1e73689d92112bdb59f16896950fb84d172ab86fa0a5ab", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0x6831cbcd76d8c65573b8a10e64205d8b690bdcdde391fdea4c6e3958e1c89245", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "verifier",
+      "publicKeys": [
+        {"x": "0x56df0f4236c9b40fc8255cd57d3be9cb08c6ff963ca03d91a86d38a2b886bdd1", "y": "0x8bc3b7e8aa83e52746fc64b1a89db04eb6fac31ea3403f8a5861bb085d054efa"},
+        {"x": "0x29c375f9fe55b94b188d25e391ee5049c03c3fcac88671a1a17708b84ca9cf44", "y": "0xb987c41788c63aa7fb450c8174b2867ca24567269b662047ca225d3a9250ffa9"},
+        {"x": "0xcac0a7c35d38c030dba170c61193a0781eb899fcf7437a9fece55da7020f1cc4", "y": "0xb62159ea8302036b0e7079b33473b290181afb45a43e678829e4b259155f16e6"},
+        {"x": "0x0000000000000000000000000000000000000000000000000000000000000000", "y": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+        {"x": "0x0000000000000000000000000000000000000000000000000000000000000000", "y": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+        {"x": "0x0000000000000000000000000000000000000000000000000000000000000000", "y": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+        {"x": "0x0000000000000000000000000000000000000000000000000000000000000000", "y": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+        {"x": "0x0000000000000000000000000000000000000000000000000000000000000000", "y": "0x0000000000000000000000000000000000000000000000000000000000000000"}
+      ], "signerCount": 3, "signerBitmask": 7},
+    "endpoint": {"proxy": "0xf5B0c66E2f0B6298c3ADf2d86A126cF847aE5b29", "implementation": "0x5493C643942c92006d6e31A1EBDAcdAE08FA0b9E", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613240, "deploymentTx": "0x74a29d34addbfa926a5110a584c936475046168a256b27c8fa09d71b289bb861", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0x19a7a82b28594d754ac7e86d8846073bd5fdc3df8b76b71d3f92a8897b5a22d9", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "endpoint", "initializeBlock": 57614000, "initializeTx": "0x3c95ce39dd1ae942eb2191703e716e398e7359f46003666cab1d331fe58f19cd"},
+    "clearinghouse": {"proxy": "0x5da0df9CDf67ad634c34702925e11e745AD9BE10", "implementation": "0x33373f2D2E0b8cb122BeA79E64Ec6A7748217b87", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613284, "deploymentTx": "0xe084fe42a500feaa306b89f4958bc311e12acb1eb7d3b0faf36d31fe23891ff2", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0xc3bedcdf52149dbe06fb791ce6473fe2e5a108fe3ab3a7b2f83048918f641dc0", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "clearinghouse"},
+    "spotEngine": {"proxy": "0xDb6b1A4110ae3fa04594C292e3cd9EC1C997dDd8", "implementation": "0x4d93E640c7E459c59563314fF9e207c6c79272D4", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613322, "deploymentTx": "0xa1843fb58431f1bd5976f610aef1e5299f88c08a4618514414d1974ec76b7bbc", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0xa063ae9fee84b2e58c76e14e0a747761d47f62b2efbb8c04aa1b7f99197b7bc3", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "spotEngine"},
+    "perpEngine": {"proxy": "0x01432b0b0C160e440Bbb07e4b36F645Ae3BCde42", "implementation": "0x6a25C7a84505F5Dbe184A86bc30fe64F900642a7", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613371, "deploymentTx": "0xe6cbb1156d08f51957ffb97c0bec0d348dda52f89ecfb79b8dd3746182f60019", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0xe714305a4b02af4015788048bab6bd30d0d603b1afb18505f0d2d265d090ab5f", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "perpEngine"},
+    "offchainExchange": {"proxy": "0x795Bec0412237E81635c0A633AB76E647E3a9D48", "implementation": "0x843561F24457aDF380642A5196f3517F6CA31e5b", "admin": "0x64a5c69F138B6a23BB2a441053DD4d4B72f642bd", "deploymentBlock": 57613423, "deploymentTx": "0xa28a71761beba07843a675213031c6fd8372d9012fc197c502c708c18935791a", "proxyRuntimeCodeHash": "0x6bec2bf64f7e824109f6ed55f77dd7665801d6195e461666ad6a5342a9f6daf5", "implementationRuntimeCodeHash": "0x1a609df601f0886279e38c8f9ce6863c1f50e620e98dc307d75414ed7a3a2f78", "adminRuntimeCodeHash": "0x884cea40c597f81a7bdfe511ae4bf962b02f18e8744e0f4912e1e87d44c35b14", "label": "offchainExchange"}
+  },
+  "markets": {
+    "BTCUSDCPERP": {"productId": 2, "virtualBook": "0x0900E6C02ac39D6c32AA0cB305551bEaA0c6216e", "virtualBookDeploymentBlock": 57613918, "virtualBookDeploymentTx": "0x83ec7f1716e6156b198353312b7680917b0433891f6ec4099b3157cd70b45dc7", "virtualBookRuntimeCodeHash": "0x2e042f196dff26993fc6261a1dc43928cd77d5f9a060a308468d39a49a082ab5", "addProductBlock": 57614017, "addProductTx": "0xdcede086cbbc5e392a0493d0c0e8b8ea2d7b6dec0b478c1de78a4a960f0d9486", "sizeIncrementX18": "1000000000000000", "minSizeX18": "1000000000000000", "risk": {"longWeightInitial": 666666667, "shortWeightInitial": 1333333333, "longWeightMaintenance": 950000000, "shortWeightMaintenance": 1050000000, "priceX18": "83680000000000008388608"}},
+    "ETHUSDCPERP": {"productId": 4, "virtualBook": "0xe57077370F49eED127B74e5c1a8A7A391132DAF1", "virtualBookDeploymentBlock": 57613935, "virtualBookDeploymentTx": "0xbbebf935176502c4b9c31a5e9224d432b09a4c9fff80a8b79cb9e17bcbf7dbfb", "virtualBookRuntimeCodeHash": "0x81578210121cbc1da280f6142d194669a881637f43b78c7c3200bc8ca7b628e2", "addProductBlock": 57614037, "addProductTx": "0xeceac8b5b01de5c9fd8075e446be08ae494978a6f6c83b0ddb06ad66a7906cbd", "sizeIncrementX18": "1000000000000000", "minSizeX18": "10000000000000000", "risk": {"longWeightInitial": 666666667, "shortWeightInitial": 1333333333, "longWeightMaintenance": 950000000, "shortWeightMaintenance": 1050000000, "priceX18": "2688110000000000327680"}},
+    "SOLUSDCPERP": {"productId": 6, "virtualBook": "0x23c725b9cA8c5642D961613a8239d2030eB2f8BE", "virtualBookDeploymentBlock": 57613953, "virtualBookDeploymentTx": "0x48bed803ac1b3fd0647b4c94529ef7b1326622a3a6ab5fea4678c1a42cd03985", "virtualBookRuntimeCodeHash": "0xab4e2e863a82c95ef76f72127a29aed7d3e63e4e26641ac47b2662b08128eb35", "addProductBlock": 57614053, "addProductTx": "0xede4c1c94b0962df64aab6a1ef75bc673172a07905ebdfeeaf7b3e3fc13f2bde", "sizeIncrementX18": "10000000000000000", "minSizeX18": "100000000000000000", "risk": {"longWeightInitial": 666666667, "shortWeightInitial": 1333333333, "longWeightMaintenance": 950000000, "shortWeightMaintenance": 1050000000, "priceX18": "119380000000000000000"}},
+    "0GUSDCPERP": {"productId": 8, "virtualBook": "0xfd9bEbD5376dd26413eCAd10705b552Bb7F6c52F", "virtualBookDeploymentBlock": 57613980, "virtualBookDeploymentTx": "0x26db77f27c7ab8f14ea50ce5b91784881b3c7219dfc02f4807b8cb946cb22334", "virtualBookRuntimeCodeHash": "0xb5abbe7c7ce1b16ab0ef6bacb7542605c60c345c6c08d7a54d1f29b1ecbeeb08", "addProductBlock": 57614071, "addProductTx": "0x0f4048d8cec975302598945eec35a918fcf3985f8315ac45566b9d71b669c881", "sizeIncrementX18": "1000000000000000000", "minSizeX18": "10000000000000000000", "risk": {"longWeightInitial": 666666667, "shortWeightInitial": 1333333333, "longWeightMaintenance": 950000000, "shortWeightMaintenance": 1050000000, "priceX18": "336566000000000000"}}
+  },
+  "initialPrices": ["1000000000000000000", "0", "83680000000000008388608", "0", "2688110000000000327680", "0", "119380000000000000000", "0", "336566000000000000"]
+}

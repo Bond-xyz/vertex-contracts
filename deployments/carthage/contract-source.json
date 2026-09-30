@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "bond-perpdex-contract-source",
+  "repository": "Bond-xyz/vertex-contracts",
+  "branch": "bond/galileo-refork",
+  "head": "d3010540c8d18d60a691df2bd75f401582c9eb86",
+  "auditedBaseCommit": "6d5df597afe4eb16c6131a85f45322e0954b9e94",
+  "auditedBaseTag": "vertex-v2-ottersec-a06f33",
+  "reviewedReleaseCommits": [
+    "a3311f62ec4088ca1ec7e8b2c8584c424258f9d8",
+    "d3010540c8d18d60a691df2bd75f401582c9eb86"
+  ],
+  "deployPipeline": {
+    "command": "corepack yarn deploy:galileo",
+    "checklist": "GALILEO_CUTOVER_CHECKLIST.md",
+    "manifest": "deployments/16602/latest.local.json"
+  },
+  "supersededSources": [
+    {
+      "commit": "e138181537bb023bd9d776016270a9362caad3c6",
+      "ref": "main",
+      "path": "core",
+      "reason": "upstream Vertex v3.4.0; does not descend from the audited base, emits no DepositCollateralWithReferral, and ships OffchainExchange._validateOrder with _checkSignature commented out"
+    }
+  ]
+}

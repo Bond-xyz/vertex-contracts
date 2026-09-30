@@ -1,0 +1,75 @@
+{
+  "chainId": 16602,
+  "quoteToken": "0xF2506aa3684871549083d235453a1dcDcCB3396c",
+  "sequencer": "0xA54Eb7eBC07ec22Be83752B9D9c14a7f9502C010",
+  "verifierPublicKeys": [
+    {
+      "x": "0x56df0f4236c9b40fc8255cd57d3be9cb08c6ff963ca03d91a86d38a2b886bdd1",
+      "y": "0x8bc3b7e8aa83e52746fc64b1a89db04eb6fac31ea3403f8a5861bb085d054efa"
+    },
+    {
+      "x": "0x29c375f9fe55b94b188d25e391ee5049c03c3fcac88671a1a17708b84ca9cf44",
+      "y": "0xb987c41788c63aa7fb450c8174b2867ca24567269b662047ca225d3a9250ffa9"
+    },
+    {
+      "x": "0xcac0a7c35d38c030dba170c61193a0781eb899fcf7437a9fece55da7020f1cc4",
+      "y": "0xb62159ea8302036b0e7079b33473b290181afb45a43e678829e4b259155f16e6"
+    }
+  ],
+  "signerBitmask": 7,
+  "spreads": "0",
+  "products": [
+    {
+      "symbol": "BTCUSDCPERP",
+      "productId": 2,
+      "sizeIncrementX18": "1000000000000000",
+      "minSizeX18": "1000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 666666667,
+        "shortWeightInitial": 1333333333,
+        "longWeightMaintenance": 950000000,
+        "shortWeightMaintenance": 1050000000
+      }
+    },
+    {
+      "symbol": "ETHUSDCPERP",
+      "productId": 4,
+      "sizeIncrementX18": "1000000000000000",
+      "minSizeX18": "10000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 666666667,
+        "shortWeightInitial": 1333333333,
+        "longWeightMaintenance": 950000000,
+        "shortWeightMaintenance": 1050000000
+      }
+    },
+    {
+      "symbol": "SOLUSDCPERP",
+      "productId": 6,
+      "sizeIncrementX18": "10000000000000000",
+      "minSizeX18": "100000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 666666667,
+        "shortWeightInitial": 1333333333,
+        "longWeightMaintenance": 950000000,
+        "shortWeightMaintenance": 1050000000
+      }
+    },
+    {
+      "symbol": "0GUSDCPERP",
+      "productId": 8,
+      "sizeIncrementX18": "1000000000000000000",
+      "minSizeX18": "10000000000000000000",
+      "lpSpreadX18": "0",
+      "risk": {
+        "longWeightInitial": 666666667,
+        "shortWeightInitial": 1333333333,
+        "longWeightMaintenance": 950000000,
+        "shortWeightMaintenance": 1050000000
+      }
+    }
+  ]
+}
