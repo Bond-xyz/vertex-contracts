@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "policyId": "bond-perpdex-og-mainnet-usdz-stork-deployment-prices",
-  "status": "blocked_pending_reviewed_cross_feed_timestamp_spread",
+  "status": "approved_for_og_mainnet_release",
   "chainId": 16661,
   "backend": {
     "repository": "Bond-xyz/perpdex-rust-backend",
@@ -51,9 +51,9 @@
     "maxFutureSkewSeconds": 2
   },
   "coherence": {
-    "maxSignedTimestampSpreadSeconds": null,
+    "maxSignedTimestampSpreadSeconds": 3,
     "decisionOwner": "Red",
-    "decision": "pending_explicit_red_policy_input"
+    "decision": "approve_exact_og_mainnet_cross_feed_timestamp_spread"
   },
   "snapshot": {
     "schemaVersion": 1,

@@ -27,16 +27,16 @@
   "initialPricePolicy": {
     "source": "verified_stork_deployment_snapshot",
     "policyFile": "config/og-mainnet-usdz.stork-deployment-policy.json",
-    "policySha256": "5e4a42a957b46911f3e5fda56e992809c3430fc9c7d7f27de1cfae89b27a344e",
+    "policySha256": "2011d9c8f362da3b0dffce5e756e8c050f90a4c73d0700e55a5447b5591cd910",
     "staticPriceAllowed": false,
     "snapshotTracked": false,
     "graphPreparationRequiresSnapshot": false,
     "snapshotRequiredBeforeFirstPriceBearingTransaction": true
   },
   "riskModel": {
-    "initialMarginPercent": "5",
-    "maintenanceMarginPercent": "2.5",
-    "maximumLeverage": "20",
+    "initialMarginPercent": "100",
+    "maintenanceMarginPercent": "50",
+    "maximumLeverage": "1",
     "weightStorageDecimals": 9,
     "contractWeightDecimals": 18
   },
@@ -109,10 +109,10 @@
   },
   "blockers": [],
   "approval": {
-    "approved": false,
+    "approved": true,
     "approver": "Red",
-    "decision": "pending_red_approval",
-    "approvedAt": null,
-    "recordedScope": "0G mainnet USDZ deployment only; exact Galileo sizing and 20x risk retained; no fixed deploy-time prices"
+    "decision": "approve_og_mainnet_vectors_with_verified_stork_deploy_time_prices",
+    "approvedAt": "2026-11-10T20:07:26Z",
+    "recordedScope": "0G mainnet USDZ deployment only; exact Galileo sizing; 1x maximum leverage (Red = Adam); no fixed deploy-time prices"
   }
 }

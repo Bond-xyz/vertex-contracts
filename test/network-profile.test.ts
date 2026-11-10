@@ -17,6 +17,7 @@ import {
   resolveNetworkProfile,
   resolveSequencer,
 } from '../scripts/deployment-config';
+import { assertSequencerLeverageEvidence } from '../scripts/stork-deployment-snapshot';
 
 const root = path.resolve(__dirname, '..');
 const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
@@ -88,8 +89,9 @@ describe('PerpDex network profiles', () => {
   it('keeps mainnet config files bound to their own profile', () => {
     for (const profile of [mainnet, usdz]) {
       const products = loadProducts(path.join(root, profile.files.products), { requireApproved: false, profile });
-      expect(products.approved).to.equal(false);
-      expect(() => loadProducts(path.join(root, profile.files.products), { profile })).to.throw('not approved');
+      // Red (Adam) approved the 1x mainnet vectors.
+      expect(products.approved).to.equal(true);
+      expect(() => loadProducts(path.join(root, profile.files.products), { profile })).not.to.throw();
       expect(() =>
         loadProducts(path.join(root, PERPDEX_NETWORK_PROFILES.galileo.files.products), { profile })
       ).to.throw('chainId must be 16661');
@@ -195,6 +197,121 @@ describe('PerpDex network profiles', () => {
       const policy = readJson(profile.files.storkPolicy);
       expect(policy.verifier.aggregatorPublicKey).to.equal(profile.storkAggregator.current);
       expect(policy.verifier.aggregatorKeyProvenance).to.deep.equal(profile.storkAggregator.provenance);
+    }
+  });
+
+  it('refuses the 2e9 sentinel short weight and gates mainnet on sequencer 1x runtime evidence', () => {
+    const products = readJson(mainnet.files.products);
+    products.products[0].risk.shortWeightInitial = 2_000_000_000;
+    const file = path.join(os.tmpdir(), `og-mainnet-sentinel-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify(products));
+    expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
+    products.products[0].risk.shortWeightInitial = 2_000_000_002;
+    fs.writeFileSync(file, JSON.stringify(products));
+    expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
+    fs.unlinkSync(file);
+    for (const profile of [mainnet, usdz]) {
+      expect(() => assertSequencerLeverageEvidence(profile)).to.throw(
+        'sequencer 1x runtime config evidence is unresolved'
+      );
+    }
+    expect(() => assertSequencerLeverageEvidence(PERPDEX_NETWORK_PROFILES.galileo)).not.to.throw();
+    // A mainnet profile cannot switch the gate off.
+    for (const profile of [mainnet, usdz]) {
+      expect(() =>
+        assertSequencerLeverageEvidence({ ...profile, sequencerLeverageEvidence: { required: false, evidence: null } })
+      ).to.throw('gate must stay required');
+    }
+    const file0 = { path: 'services/trading/run/config.toml', blob: 'a'.repeat(40), sha256: 'b'.repeat(64) };
+    type Evidence = NonNullable<typeof mainnet.sequencerLeverageEvidence.evidence>;
+    const evidence = (shortOpeningCollateralPpb: number, maxLeverage = 1, overrides: Record<string, unknown> = {}) =>
+      ({
+        ...mainnet,
+        sequencerLeverageEvidence: {
+          required: true,
+          evidence: {
+            repository: 'Bond-xyz/bond-perpdex',
+            commit: 'c'.repeat(40),
+            tree: 'd'.repeat(40),
+            maxLeverage,
+            shortOpeningCollateralPpb,
+            shortAdmissionBasis: 'post_fill_initial_health_at_oracle_mark',
+            feesReservedSeparately: true,
+            lanes: [
+              { deployment: 'og-mainnet', files: [file0] },
+              { deployment: 'og-mainnet-usdz', files: [file0] },
+            ],
+            ...overrides,
+          } as Evidence,
+        },
+      } as typeof mainnet);
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001))).not.to.throw();
+    // The integer 1x cap alone (exact-notional short reserve) is not sufficient.
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_000))).to.throw('does not preserve');
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 20))).to.throw('does not preserve');
+    // Health values shorts at the oracle mark and fees leave quote after the fill.
+    for (const overrides of [
+      { shortAdmissionBasis: 'ppb_of_fill_notional' },
+      { shortAdmissionBasis: 'ppb_of_max_fill_and_mark_notional' },
+      { shortAdmissionBasis: undefined },
+      { feesReservedSeparately: false },
+      { feesReservedSeparately: undefined },
+      { repository: '' },
+      { repository: 'not a repo' },
+      { lanes: [{ deployment: 'og-mainnet', files: [file0] }] },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [file0, file0] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [{ ...file0, path: '../config.toml' }] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [{ ...file0, path: '/etc/config.toml' }] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+    ]) {
+      expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 1, overrides))).to.throw(
+        'does not preserve'
+      );
+    }
+    expect(() =>
+      assertSequencerLeverageEvidence(
+        evidence(1_000_000_001, 1, {
+          lanes: [
+            { deployment: 'og-mainnet', files: [{ ...file0, blob: 'z'.repeat(40) }] },
+            { deployment: 'og-mainnet-usdz', files: [file0] },
+          ],
+        })
+      )
+    ).to.throw();
+  });
+
+  it('refuses the 2e9 sentinel short weight under the Galileo profile too', () => {
+    const galileo = PERPDEX_NETWORK_PROFILES.galileo;
+    const products = readJson(galileo.files.products);
+    products.products[0].risk.shortWeightInitial = 2_000_000_000;
+    const file = path.join(os.tmpdir(), `galileo-sentinel-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify(products));
+    try {
+      expect(() => loadProducts(file, { profile: galileo, requireApproved: false })).to.throw(
+        'risk weights violate audited bounds'
+      );
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('never funds insurance from any deployment script', () => {
+    for (const file of fs.readdirSync(path.join(root, 'scripts'))) {
+      expect(fs.readFileSync(path.join(root, 'scripts', file), 'utf8'), file).not.to.match(/depositInsurance/);
     }
   });
 

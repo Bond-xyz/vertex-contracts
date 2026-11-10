@@ -60,6 +60,22 @@ contract PerpEngineReleaseHarness is PerpEngine {
         balances[productId][X_ACCOUNT].amount = amount;
         balances[productId][X_ACCOUNT].vQuoteBalance = vQuoteBalance;
     }
+
+    function setBalanceForTest(
+        uint32 productId,
+        bytes32 subaccount,
+        int128 amount,
+        int128 vQuoteBalance
+    ) external {
+        balances[productId][subaccount].amount = amount;
+        balances[productId][subaccount].vQuoteBalance = vQuoteBalance;
+    }
+
+    function setPriceForTest(uint32 productId, int128 priceX18) external {
+        RiskHelper.RiskStore memory r = _risk().value[productId];
+        r.priceX18 = priceX18;
+        _risk().value[productId] = r;
+    }
 }
 
 contract MockSpotEngineForEndpoint {

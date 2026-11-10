@@ -580,7 +580,56 @@ export type GalileoStaticReleasePolicy = ReturnType<typeof loadTrackedStorkDeplo
   collateralProvenanceSha256: string;
 };
 
+export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile): void {
+  const gate = profile.sequencerLeverageEvidence;
+  if (!gate.required) {
+    // Only the tracked testnet may skip the gate; any externally reviewed
+    // (mainnet) profile that turns it off is refused, not silently passed.
+    if (profile.approvalMode !== 'tracked_red_testnet_approval') {
+      throw new Error(`${profile.name} sequencer leverage evidence gate must stay required`);
+    }
+    return;
+  }
+  const evidence = gate.evidence;
+  if (evidence === null) {
+    throw new Error(
+      `${profile.name} backend sequencer ${profile.riskModel.maximumLeverage}x runtime config evidence is unresolved`
+    );
+  }
+  requireGitObject(evidence.commit, 'sequencer runtime config commit');
+  requireGitObject(evidence.tree, 'sequencer runtime config tree');
+  const lanes = evidence.lanes.map((lane) => lane.deployment).sort();
+  const expectedLanes = [profile.name, ...profile.distinctVerifierQuorumFrom].sort();
+  const safePath = (file: string) =>
+    /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(file) && !file.split('/').some((part) => part === '..');
+  if (
+    typeof evidence.repository !== 'string' ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(evidence.repository) ||
+    evidence.maxLeverage !== Number(profile.riskModel.maximumLeverage) ||
+    !Number.isSafeInteger(evidence.shortOpeningCollateralPpb) ||
+    evidence.shortOpeningCollateralPpb < profile.riskModel.weights.shortWeightInitial - 1_000_000_000 ||
+    evidence.shortAdmissionBasis !== 'post_fill_initial_health_at_oracle_mark' ||
+    evidence.feesReservedSeparately !== true ||
+    JSON.stringify(lanes) !== JSON.stringify(expectedLanes) ||
+    evidence.lanes.some(
+      (lane) =>
+        lane.files.length === 0 ||
+        new Set(lane.files.map((file) => file.path)).size !== lane.files.length ||
+        lane.files.some((file) => typeof file.path !== 'string' || !safePath(file.path))
+    )
+  ) {
+    throw new Error(`${profile.name} sequencer runtime config evidence does not preserve the reviewed leverage cap`);
+  }
+  for (const lane of evidence.lanes) {
+    for (const file of lane.files) {
+      requireGitObject(file.blob, `${lane.deployment} ${file.path} blob`);
+      requireSha256(file.sha256, `${lane.deployment} ${file.path} SHA-256`);
+    }
+  }
+}
+
 export function collectGalileoStaticReleasePolicy(input: { repoRoot?: string } = {}): GalileoStaticReleasePolicy {
+  assertSequencerLeverageEvidence(PERPDEX_NETWORK);
   const repoRoot = input.repoRoot || path.resolve(__dirname, '..');
   const tracked = loadTrackedStorkDeploymentPolicy(repoRoot);
   if (tracked.policy.coherence.maxSignedTimestampSpreadSeconds === null) {

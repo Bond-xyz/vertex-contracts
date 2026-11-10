@@ -43,6 +43,10 @@ attempt('storkPolicyNoProvenance', () => stork.validateStorkDeploymentPolicy({ .
 const btc = storkPolicy.feeds.find((feed) => feed.feedId === 'BTCUSD');
 const oldKeyFeed = { pair: btc.pair, symbol: btc.symbol, productId: btc.productId, feedId: 'BTCUSD', assetId: 'BTCUSD', signatureType: 'evm', envelopeTimestampNs: '1', priceX18: '1', proof: { publicKey: '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44', signedTimestampNs: '1' } };
 attempt('oldKeySnapshotFeed', () => stork.verifyStorkSignedFeed(oldKeyFeed, btc, storkPolicy.verifier));
+results.storkSpread = storkPolicy.coherence.maxSignedTimestampSpreadSeconds;
+results.storkStatus = storkPolicy.status;
+results.storkDecision = storkPolicy.coherence.decision;
+attempt('staticReleasePolicy', () => stork.collectGalileoStaticReleasePolicy());
 console.log(JSON.stringify(results));
 `;
 
@@ -70,6 +74,14 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.storkPolicyOldKey).to.include('does not match the reviewed protocol baseline constraints');
       expect(results.storkPolicyNoProvenance).to.include('does not match the reviewed protocol baseline constraints');
       expect(results.oldKeySnapshotFeed).to.include('previous replay-only Stork aggregator key');
+      // Red (Adam): exact 3-second cross-feed signed-timestamp spread.
+      expect(results.storkSpread).to.equal(3);
+      expect(results.storkStatus).to.equal('approved_for_og_mainnet_release');
+      expect(results.storkDecision).to.equal('approve_exact_og_mainnet_cross_feed_timestamp_spread');
+      // The 1x sequencer evidence gate is the first release-preparation refusal.
+      expect(results.staticReleasePolicy).to.equal(
+        `${profile} backend sequencer 1x runtime config evidence is unresolved`
+      );
     });
   }
 });

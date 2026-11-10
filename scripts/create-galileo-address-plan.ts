@@ -217,7 +217,7 @@ export function createGalileoAddressPlan(
       productIds: [2, 4, 6, 8],
       clearinghouseSpreadsX18: '0',
       lpSpreadsX18: ['0', '0', '0', '0'],
-      maximumLeverage: 20,
+      maximumLeverage: Number(profile.riskModel.maximumLeverage),
       storkMaxAgeSeconds: 30,
       storkMaxFutureSkewSeconds: 2,
       storkMaxSignedTimestampSpreadSeconds: 3,

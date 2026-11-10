@@ -202,22 +202,20 @@ export function validateProductApprovalReview(
   if (review.rustSource.baseDecimals !== 8) {
     throw new Error('Rust product quantities must use the tracked 8-decimal base-unit representation');
   }
+  const riskModel = PERPDEX_NETWORK.riskModel;
   if (
-    review.riskModel.initialMarginPercent !== '5' ||
-    review.riskModel.maintenanceMarginPercent !== '2.5' ||
-    review.riskModel.maximumLeverage !== '20' ||
+    review.riskModel.initialMarginPercent !== riskModel.initialMarginPercent ||
+    review.riskModel.maintenanceMarginPercent !== riskModel.maintenanceMarginPercent ||
+    review.riskModel.maximumLeverage !== riskModel.maximumLeverage ||
     review.riskModel.weightStorageDecimals !== 9 ||
     review.riskModel.contractWeightDecimals !== 18
   ) {
-    throw new Error('product approval review risk model is not the tracked 20x Gate-1 model');
+    throw new Error(
+      `product approval review risk model is not the tracked ${riskModel.maximumLeverage}x ${PERPDEX_NETWORK.name} model`
+    );
   }
 
-  const expectedRisk = {
-    longWeightInitial: 950_000_000,
-    shortWeightInitial: 1_050_000_000,
-    longWeightMaintenance: 975_000_000,
-    shortWeightMaintenance: 1_025_000_000,
-  };
+  const expectedRisk = riskModel.weights;
   const expectedProductIds = products.products.map((product) => product.productId);
   const reviewedProductIds = review.markets.map((market) => market.productId);
   if (
@@ -238,7 +236,9 @@ export function validateProductApprovalReview(
     }
     for (const [field, expected] of Object.entries(expectedRisk)) {
       if (product.risk[field as keyof typeof expectedRisk] !== expected) {
-        blockers.push(`${product.symbol} ${field} does not match the tracked 20x risk vector`);
+        blockers.push(
+          `${product.symbol} ${field} does not match the tracked ${PERPDEX_NETWORK.riskModel.maximumLeverage}x risk vector`
+        );
       }
     }
     const contractSizeIncrementX18 = decimalToUnits(
