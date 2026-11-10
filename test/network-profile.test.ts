@@ -185,6 +185,19 @@ describe('PerpDex network profiles', () => {
     }
   });
 
+  it('rotates only mainnet to the current Stork aggregator and keeps Galileo on its historical key', () => {
+    const galileo = PERPDEX_NETWORK_PROFILES.galileo;
+    expect(galileo.storkAggregator.current).to.equal('0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44');
+    expect(galileo.storkAggregator.provenance).to.equal(null);
+    for (const profile of [mainnet, usdz]) {
+      expect(profile.storkAggregator.current).to.equal('0x0bb53E0d5E89778DCD13C2720667D292368dD053');
+      expect(profile.storkAggregator.previousReplayOnly).to.deep.equal([galileo.storkAggregator.current]);
+      const policy = readJson(profile.files.storkPolicy);
+      expect(policy.verifier.aggregatorPublicKey).to.equal(profile.storkAggregator.current);
+      expect(policy.verifier.aggregatorKeyProvenance).to.deep.equal(profile.storkAggregator.provenance);
+    }
+  });
+
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {
     expect(fs.readFileSync(path.join(root, mainnet.files.contractBaseline), 'utf8')).to.equal(
       fs.readFileSync(path.join(root, PERPDEX_NETWORK_PROFILES.galileo.files.contractBaseline), 'utf8')

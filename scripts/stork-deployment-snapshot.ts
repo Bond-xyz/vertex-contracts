@@ -24,7 +24,6 @@ export const BLOCKED_STORK_COHERENCE_DECISION = 'pending_explicit_red_policy_inp
 export const APPROVED_STORK_DEPLOYMENT_POLICY_STATUS = PERPDEX_NETWORK.activeReleaseStatus;
 export const APPROVED_STORK_COHERENCE_DECISION = PERPDEX_NETWORK.decisions.storkCoherence;
 
-const STORK_AGGREGATOR = '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44';
 const STORK_CHECKSUM = '9be7e9f9ed459417d96112a7467bd0b27575a2c7847195c68f805b70ce1795ba';
 const NANOS_PER_SECOND = 1_000_000_000n;
 const SECP256K1_HALF_ORDER = BigNumber.from('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');
@@ -53,6 +52,7 @@ export type StorkDeploymentPolicy = {
     provider: string;
     restUrl: string;
     aggregatorPublicKey: string;
+    aggregatorKeyProvenance?: PerpdexNetworkProfile['storkAggregator']['provenance'];
     calculationAlgorithm: { type: string; version: string; checksum: string };
     maxAgeSeconds: number;
     maxFutureSkewSeconds: number;
@@ -231,7 +231,9 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
   if (
     verifier.provider !== 'stork' ||
     verifier.restUrl !== 'https://rest.jp.stork-oracle.network' ||
-    utils.getAddress(verifier.aggregatorPublicKey) !== utils.getAddress(STORK_AGGREGATOR) ||
+    utils.getAddress(verifier.aggregatorPublicKey) !== utils.getAddress(PERPDEX_NETWORK.storkAggregator.current) ||
+    JSON.stringify(verifier.aggregatorKeyProvenance ?? null) !==
+      JSON.stringify(PERPDEX_NETWORK.storkAggregator.provenance) ||
     verifier.calculationAlgorithm.type !== 'median' ||
     verifier.calculationAlgorithm.version !== 'v1' ||
     requireSha256(verifier.calculationAlgorithm.checksum, 'Stork calculation checksum') !== STORK_CHECKSUM ||
@@ -397,7 +399,13 @@ export function verifyStorkSignedFeed(
   if (price >= 2n ** 255n) throw new Error(`${expected.feedId} priceX18 exceeds positive signed int256`);
   const signedTimestamp = requireDecimalInteger(feed.proof.signedTimestampNs, `${expected.feedId} signed timestamp`);
   const publicKey = utils.getAddress(feed.proof.publicKey);
-  if (publicKey !== utils.getAddress(verifier.aggregatorPublicKey)) {
+  if (PERPDEX_NETWORK.storkAggregator.previousReplayOnly.some((key) => utils.getAddress(key) === publicKey)) {
+    throw new Error(`${expected.feedId} is signed by a previous replay-only Stork aggregator key`);
+  }
+  if (
+    publicKey !== utils.getAddress(verifier.aggregatorPublicKey) ||
+    publicKey !== utils.getAddress(PERPDEX_NETWORK.storkAggregator.current)
+  ) {
     throw new Error(`${expected.feedId} Stork aggregator does not match the reviewed protocol baseline`);
   }
   const encodedAssetId = requireBytes32(feed.proof.encodedAssetId, `${expected.feedId} encoded asset ID`);

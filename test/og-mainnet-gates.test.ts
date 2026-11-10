@@ -35,6 +35,14 @@ const { loadTrackedGalileoFeePolicy } = require('./scripts/galileo-fee-policy');
 attempt('feePolicy', () => loadTrackedGalileoFeePolicy());
 const { loadTrackedCollateralProvenance } = require('./scripts/stork-deployment-snapshot');
 attempt('provenance', () => loadTrackedCollateralProvenance());
+const stork = require('./scripts/stork-deployment-snapshot');
+const storkPolicy = JSON.parse(fs.readFileSync(PERPDEX_NETWORK.files.storkPolicy, 'utf8'));
+attempt('storkPolicy', () => stork.validateStorkDeploymentPolicy(storkPolicy));
+attempt('storkPolicyOldKey', () => stork.validateStorkDeploymentPolicy({ ...storkPolicy, verifier: { ...storkPolicy.verifier, aggregatorPublicKey: '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44' } }));
+attempt('storkPolicyNoProvenance', () => stork.validateStorkDeploymentPolicy({ ...storkPolicy, verifier: { ...storkPolicy.verifier, aggregatorKeyProvenance: undefined } }));
+const btc = storkPolicy.feeds.find((feed) => feed.feedId === 'BTCUSD');
+const oldKeyFeed = { pair: btc.pair, symbol: btc.symbol, productId: btc.productId, feedId: 'BTCUSD', assetId: 'BTCUSD', signatureType: 'evm', envelopeTimestampNs: '1', priceX18: '1', proof: { publicKey: '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44', signedTimestampNs: '1' } };
+attempt('oldKeySnapshotFeed', () => stork.verifyStorkSignedFeed(oldKeyFeed, btc, storkPolicy.verifier));
 console.log(JSON.stringify(results));
 `;
 
@@ -56,6 +64,12 @@ describe('0G mainnet profile-selected release gates', function () {
         // USDZ is still missing from the super-app generated registry.
         expect(results.provenance).to.include('unresolved operator-fill fields: sources.bondSuperApp.commit');
       }
+      // Stork rotated its aggregator: mainnet accepts only the current key with its
+      // pinned bond-perpdex provenance; the previous key is replay-only.
+      expect(results.storkPolicy).to.equal('ok');
+      expect(results.storkPolicyOldKey).to.include('does not match the reviewed protocol baseline constraints');
+      expect(results.storkPolicyNoProvenance).to.include('does not match the reviewed protocol baseline constraints');
+      expect(results.oldKeySnapshotFeed).to.include('previous replay-only Stork aggregator key');
     });
   }
 });

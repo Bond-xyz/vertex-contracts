@@ -89,6 +89,17 @@ The fee policy (`config/og-mainnet.fee-policy.json`) is approved with bounds min
 
 After any tracked config file changes, recompute the SHA-256 fields that bind it (the product review's `provenanceSha256` and `policySha256`).
 
+## Stork aggregator rotation
+
+Stork rotated its aggregator signer. Mainnet snapshots must be signed by the **current** key `0x0bb53E0d5E89778DCD13C2720667D292368dD053`. The previous key `0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44` is replay-only: `verifyStorkSignedFeed` refuses any new mainnet snapshot feed signed with it. Galileo stays on the previous key, so its historical evidence still verifies.
+
+The provenance (`profile.storkAggregator.provenance`, copied verbatim into each mainnet Stork policy as `verifier.aggregatorKeyProvenance`) is Bond-xyz/bond-perpdex `966205f8` (tree `935edbc3`):
+- `core/types/src/stork.rs`: `STORK_AGGREGATOR_PUBLIC_KEY` is the current key; `STORK_PREVIOUS_AGGREGATOR_PUBLIC_KEY` is the previous one.
+- `docs/requirements/ORACLE_MANIPULATION_GUARD.md`: the current key was independently confirmed through Stork's documented EVM deployments (`storkPublicKey()`), and the previous key is kept for replay only.
+- `deploy/base/price-oracle/resources.yaml`: the deployed price oracle pins the current key.
+
+Blob and SHA-256 values are pinned per file. A policy whose key or provenance doesn't match the profile is refused.
+
 ## Running the two deployments
 
 The OpenZeppelin network manifest path is fixed per chain (`.openzeppelin/unknown-16661.json`), and preparation requires it to be absent. Run each mainnet deployment from its own clean checkout, with its own `.env.<profile>.local`.
