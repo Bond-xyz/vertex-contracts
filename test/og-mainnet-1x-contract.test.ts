@@ -97,6 +97,43 @@ describe('0G mainnet 1x launch weights (contract health math)', () => {
     expect(collateral.add(await perp.getHealthContribution(subaccount(1), MAINTENANCE)).gt(0)).to.equal(true);
     await perp.setPriceForTest(PRODUCT_ID, PRICE.mul(4).div(3).add(1));
     expect(collateral.add(await perp.getHealthContribution(subaccount(1), MAINTENANCE)).lt(0)).to.equal(true);
+    // Exact boundary: floor(4/3 * P) is still maintenance-healthy (not liquidatable).
+    await perp.setPriceForTest(PRODUCT_ID, PRICE.mul(4).div(3));
+    expect(collateral.add(await perp.getHealthContribution(subaccount(1), MAINTENANCE)).gte(0)).to.equal(true);
+  });
+
+  it('never makes a fully collateralized 1x long maintenance-liquidatable', async () => {
+    const { perp } = await deployEngines();
+    const collateral = PRICE;
+    await perp.setBalanceForTest(PRODUCT_ID, subaccount(1), ONE, notional(ONE).mul(-1));
+    for (const mark of [PRICE.div(2), PRICE.div(1000), BigNumber.from(1)]) {
+      await perp.setPriceForTest(PRODUCT_ID, mark);
+      expect(collateral.add(await perp.getHealthContribution(subaccount(1), MAINTENANCE)).gte(0)).to.equal(true);
+    }
+  });
+
+  it('needs short admission on post-fill initial health at the oracle mark, not a ppb reserve on notional', async () => {
+    const { perp } = await deployEngines();
+    const fill = PRICE.mul(99).div(100);
+    const ppb = (n: BigNumber) => n.mul(1_000_000_001).add(999_999_999).div(1_000_000_000);
+    // Short 1 filled 1% below mark: receives fill notional as vQuote; health uses the mark.
+    await perp.setBalanceForTest(PRODUCT_ID, subaccount(1), ONE.mul(-1), notional(ONE, fill));
+    const health = await perp.getHealthContribution(subaccount(1), INITIAL);
+    // ppb reserve on fill notional and on mark notional both leave it unhealthy.
+    expect(ppb(notional(ONE, fill)).add(health).lt(0)).to.equal(true);
+    expect(ppb(notional(ONE, PRICE)).add(health).lt(0)).to.equal(true);
+    // Exact requirement: shortWeightInitial * mark notional - fill notional.
+    const required = notional(ONE, PRICE).mul(weights.shortWeightInitial).div(1_000_000_000).sub(notional(ONE, fill));
+    expect(required.add(health).gte(0)).to.equal(true);
+    expect(required.sub(1).add(health).lt(0)).to.equal(true);
+    // A long's initial health (weight 0) does not depend on the mark: fill notional suffices.
+    const longFill = PRICE.mul(101).div(100);
+    await perp.setBalanceForTest(PRODUCT_ID, subaccount(2), ONE, notional(ONE, longFill).mul(-1));
+    expect(
+      notional(ONE, longFill)
+        .add(await perp.getHealthContribution(subaccount(2), INITIAL))
+        .eq(0)
+    ).to.equal(true);
   });
 
   it('socializes bad debt across open interest when insurance is zero', async () => {

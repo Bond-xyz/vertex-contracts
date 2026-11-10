@@ -81,6 +81,14 @@ export type PerpdexNetworkProfile = {
       // short; at least shortWeightInitial - 1e9 (1_000_000_001 on mainnet) or a
       // full integer-1x short opens with negative on-chain initial health.
       shortOpeningCollateralPpb: number;
+      // Perp health values a short at the oracle mark, not the fill price: the short
+      // needs Q >= shortWeightInitial*mark*size - fill*size, i.e. ppb*mark notional
+      // plus (mark - fill)*size. Admission must check post-fill initial health at the
+      // oracle mark; a ppb reserve on fill (or mark) notional alone lets a short
+      // filled below mark open unhealthy.
+      shortAdmissionBasis: 'post_fill_initial_health_at_oracle_mark';
+      // Matching debits fees from quote after the fill; the reserve must exclude them.
+      feesReservedSeparately: true;
       lanes: readonly {
         deployment: PerpdexNetworkName;
         files: readonly { path: string; blob: string; sha256: string }[];

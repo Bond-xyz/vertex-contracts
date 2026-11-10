@@ -216,28 +216,103 @@ describe('PerpDex network profiles', () => {
       );
     }
     expect(() => assertSequencerLeverageEvidence(PERPDEX_NETWORK_PROFILES.galileo)).not.to.throw();
+    // A mainnet profile cannot switch the gate off.
+    for (const profile of [mainnet, usdz]) {
+      expect(() =>
+        assertSequencerLeverageEvidence({ ...profile, sequencerLeverageEvidence: { required: false, evidence: null } })
+      ).to.throw('gate must stay required');
+    }
     const file0 = { path: 'services/trading/run/config.toml', blob: 'a'.repeat(40), sha256: 'b'.repeat(64) };
-    const evidence = (shortOpeningCollateralPpb: number, maxLeverage = 1) => ({
-      ...mainnet,
-      sequencerLeverageEvidence: {
-        required: true,
-        evidence: {
-          repository: 'Bond-xyz/bond-perpdex',
-          commit: 'c'.repeat(40),
-          tree: 'd'.repeat(40),
-          maxLeverage,
-          shortOpeningCollateralPpb,
-          lanes: [
-            { deployment: 'og-mainnet' as const, files: [file0] },
-            { deployment: 'og-mainnet-usdz' as const, files: [file0] },
-          ],
+    type Evidence = NonNullable<typeof mainnet.sequencerLeverageEvidence.evidence>;
+    const evidence = (shortOpeningCollateralPpb: number, maxLeverage = 1, overrides: Record<string, unknown> = {}) =>
+      ({
+        ...mainnet,
+        sequencerLeverageEvidence: {
+          required: true,
+          evidence: {
+            repository: 'Bond-xyz/bond-perpdex',
+            commit: 'c'.repeat(40),
+            tree: 'd'.repeat(40),
+            maxLeverage,
+            shortOpeningCollateralPpb,
+            shortAdmissionBasis: 'post_fill_initial_health_at_oracle_mark',
+            feesReservedSeparately: true,
+            lanes: [
+              { deployment: 'og-mainnet', files: [file0] },
+              { deployment: 'og-mainnet-usdz', files: [file0] },
+            ],
+            ...overrides,
+          } as Evidence,
         },
-      },
-    });
+      } as typeof mainnet);
     expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001))).not.to.throw();
     // The integer 1x cap alone (exact-notional short reserve) is not sufficient.
     expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_000))).to.throw('does not preserve');
     expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 20))).to.throw('does not preserve');
+    // Health values shorts at the oracle mark and fees leave quote after the fill.
+    for (const overrides of [
+      { shortAdmissionBasis: 'ppb_of_fill_notional' },
+      { shortAdmissionBasis: 'ppb_of_max_fill_and_mark_notional' },
+      { shortAdmissionBasis: undefined },
+      { feesReservedSeparately: false },
+      { feesReservedSeparately: undefined },
+      { repository: '' },
+      { repository: 'not a repo' },
+      { lanes: [{ deployment: 'og-mainnet', files: [file0] }] },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [file0, file0] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [{ ...file0, path: '../config.toml' }] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+      {
+        lanes: [
+          { deployment: 'og-mainnet', files: [{ ...file0, path: '/etc/config.toml' }] },
+          { deployment: 'og-mainnet-usdz', files: [file0] },
+        ],
+      },
+    ]) {
+      expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 1, overrides))).to.throw(
+        'does not preserve'
+      );
+    }
+    expect(() =>
+      assertSequencerLeverageEvidence(
+        evidence(1_000_000_001, 1, {
+          lanes: [
+            { deployment: 'og-mainnet', files: [{ ...file0, blob: 'z'.repeat(40) }] },
+            { deployment: 'og-mainnet-usdz', files: [file0] },
+          ],
+        })
+      )
+    ).to.throw();
+  });
+
+  it('refuses the 2e9 sentinel short weight under the Galileo profile too', () => {
+    const galileo = PERPDEX_NETWORK_PROFILES.galileo;
+    const products = readJson(galileo.files.products);
+    products.products[0].risk.shortWeightInitial = 2_000_000_000;
+    const file = path.join(os.tmpdir(), `galileo-sentinel-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify(products));
+    try {
+      expect(() => loadProducts(file, { profile: galileo, requireApproved: false })).to.throw(
+        'risk weights violate audited bounds'
+      );
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('never funds insurance from any deployment script', () => {
+    for (const file of fs.readdirSync(path.join(root, 'scripts'))) {
+      expect(fs.readFileSync(path.join(root, 'scripts', file), 'utf8'), file).not.to.match(/depositInsurance/);
+    }
   });
 
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {
