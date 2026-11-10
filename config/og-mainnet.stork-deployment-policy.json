@@ -19,7 +19,29 @@
   "verifier": {
     "provider": "stork",
     "restUrl": "https://rest.jp.stork-oracle.network",
-    "aggregatorPublicKey": "0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44",
+    "aggregatorPublicKey": "0x0bb53E0d5E89778DCD13C2720667D292368dD053",
+    "aggregatorKeyProvenance": {
+      "repository": "Bond-xyz/bond-perpdex",
+      "commit": "966205f818c46a31758798129dd194d0c5d2bbfb",
+      "tree": "935edbc3bf867dc3fd9ab2617ba6457700f23c1c",
+      "files": [
+        {
+          "path": "core/types/src/stork.rs",
+          "blob": "a028818f3dd0fcdc9d86851d074926f1dde698a2",
+          "sha256": "dd61e82ce9f0ff5f9cb36a2312ba9ad4cd2980380f0f5d096f2e534b6901ad46"
+        },
+        {
+          "path": "docs/requirements/ORACLE_MANIPULATION_GUARD.md",
+          "blob": "ef4cae72a6783412b71ca87240a74ce9cd9624e8",
+          "sha256": "ecf8ba063df28ec1ad59d475615e21f191df8582320a08d869993efb63c3b678"
+        },
+        {
+          "path": "deploy/base/price-oracle/resources.yaml",
+          "blob": "8e2f010a25b51848227f5e44da82894f2742b197",
+          "sha256": "3e86419fd79dd406ee041452a0c2731bce928d16212062ad32b24c8ce1fa9d50"
+        }
+      ]
+    },
     "calculationAlgorithm": {
       "type": "median",
       "version": "v1",

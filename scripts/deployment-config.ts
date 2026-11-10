@@ -39,6 +39,18 @@ export type PerpdexNetworkProfile = {
   // Pinned external release reviewer; a null address keeps the reviewer allowlist empty (blocked).
   // mayBeDeployer records an explicit delegation of review to the deployer key.
   releaseReviewer: { name: string; address: string | null; mayBeDeployer: boolean } | null;
+  // The Stork aggregator key a new deployment snapshot must be signed by. Keys in
+  // previousReplayOnly verify historical evidence only and never a new snapshot.
+  storkAggregator: {
+    current: string;
+    previousReplayOnly: readonly string[];
+    provenance: {
+      repository: string;
+      commit: string;
+      tree: string;
+      files: readonly { path: string; blob: string; sha256: string }[];
+    } | null;
+  };
   // Endpoint.submitTransactionsChecked signs keccak(idx, transactions) with no
   // chainId or Endpoint address, so a batch signed for one deployment replays on
   // any other Endpoint whose nSubmissions matches. Deployments listed here must
@@ -105,6 +117,11 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
   activeReleaseStatus: 'approved_for_galileo_testnet_release',
   operators: { deployer: null, sequencer: null, contractAdmin: null },
   releaseReviewer: null,
+  storkAggregator: {
+    current: '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44',
+    previousReplayOnly: [],
+    provenance: null,
+  },
   distinctVerifierQuorumFrom: [],
   ids: {
     releasePolicy: 'bond-perpdex-galileo-testnet-release',
@@ -197,6 +214,37 @@ const OG_MAINNET_SHARED = {
   },
   // Adam delegated release review to the deployer key: he approves, then the
   // attestation is signed with the deployer wallet. The sequencer stays independent.
+  // Stork rotated its aggregator signer. bond-perpdex (backend authority) pins
+  // the current key in core/types/src/stork.rs, keeps 0x0a803F… as previous
+  // (replay-only), records its independent confirmation via Stork's documented
+  // EVM deployments in ORACLE_MANIPULATION_GUARD.md, and deploys it in the
+  // price-oracle resources. Galileo evidence stays on the previous key.
+  storkAggregator: {
+    current: '0x0bb53E0d5E89778DCD13C2720667D292368dD053',
+    previousReplayOnly: ['0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44'],
+    provenance: {
+      repository: 'Bond-xyz/bond-perpdex',
+      commit: '966205f818c46a31758798129dd194d0c5d2bbfb',
+      tree: '935edbc3bf867dc3fd9ab2617ba6457700f23c1c',
+      files: [
+        {
+          path: 'core/types/src/stork.rs',
+          blob: 'a028818f3dd0fcdc9d86851d074926f1dde698a2',
+          sha256: 'dd61e82ce9f0ff5f9cb36a2312ba9ad4cd2980380f0f5d096f2e534b6901ad46',
+        },
+        {
+          path: 'docs/requirements/ORACLE_MANIPULATION_GUARD.md',
+          blob: 'ef4cae72a6783412b71ca87240a74ce9cd9624e8',
+          sha256: 'ecf8ba063df28ec1ad59d475615e21f191df8582320a08d869993efb63c3b678',
+        },
+        {
+          path: 'deploy/base/price-oracle/resources.yaml',
+          blob: '8e2f010a25b51848227f5e44da82894f2742b197',
+          sha256: '3e86419fd79dd406ee041452a0c2731bce928d16212062ad32b24c8ce1fa9d50',
+        },
+      ],
+    },
+  },
   releaseReviewer: {
     name: 'Adam (deployer wallet)',
     address: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7',
@@ -312,6 +360,7 @@ function ogMainnetProfile(input: {
     activeReleaseStatus: OG_MAINNET_SHARED.activeReleaseStatus,
     operators: OG_MAINNET_SHARED.operators,
     releaseReviewer: OG_MAINNET_SHARED.releaseReviewer,
+    storkAggregator: OG_MAINNET_SHARED.storkAggregator,
     distinctVerifierQuorumFrom: [input.sibling],
     ids: {
       releasePolicy: `bond-perpdex-${input.name}-release`,
