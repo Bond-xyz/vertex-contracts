@@ -31,7 +31,7 @@ Vertex `Endpoint` has exactly one quote token (product 0). USDC.e and USDZ colla
 | Deployer | `0x07b735E020549ba56AAb8e3370d102C2Df6cabF7`, a local hot key like on testnet (no custody signer) | Profile pin `operators.deployer`, enforced by the deployment intent, the address plan, and `deploy-galileo.ts` (signer address check before any RPC). The key is read from `PERPDEX_OG_MAINNET_DEPLOYER_PRIVATE_KEY`; it lives in GCP Secret Manager `g-bond` as `perpdex-mainnet-deployer-private-key`. |
 | Sequencer | `0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59` (Fordefi production vault) | Profile pin. `resolveSequencer` and the deployment intent refuse any other value. |
 | Contract admin / owner | `0x7a3A932F1cc402941f3238292c80d138dA49Be25` (Fordefi Vault 1.3) | Profile pin, recorded as `ownershipHandoff` in the address plan. The handoff is not executed by this pipeline. |
-| Release reviewer | Adam, sole external reviewer (`external_reviewer_signature`, 1 signature, no multisig) | Profile pin `releaseReviewer`. The reviewer allowlist stays empty, and the release stays blocked, until Adam's signing address is filled in. The reviewer must differ from the deployer and sequencer. |
+| Release reviewer | Adam (sole reviewer; `external_reviewer_signature`, 1 signature, no multisig), delegated to the deployer wallet `0x07b735E020549ba56AAb8e3370d102C2Df6cabF7` | Profile pin `releaseReviewer` (`mayBeDeployer: true`) plus `reviewers` in both release policies. The reviewer-independence check is relaxed for the deployer role on mainnet profiles only. The reviewer still has to differ from the sequencer, and Galileo keeps the full check. |
 | Verifier quorum (USDC.e) | 3 secp256k1 keys, bitmask 7 | Public points in `config/og-mainnet.verifier-public-keys.json`. The private halves are only in GCP Secret Manager `g-bond`: `perpdex-mainnet-verifier-key-0/1/2`. |
 | Verifier quorum (USDZ) | 3 distinct secp256k1 keys, bitmask 7 | Public points in `config/og-mainnet-usdz.verifier-public-keys.json`. The private halves are only in GCP Secret Manager `g-bond`: `perpdex-mainnet-usdz-verifier-key-0/1/2`. |
 
@@ -51,7 +51,13 @@ Vertex `Endpoint` has exactly one quote token (product 0). USDC.e and USDZ colla
 
 ## Fail-closed gates still open on this branch
 
-- Release policies: `reviewers: []` (Adam's address is pending) and status `pending_og_mainnet_review`. The external attestation path refuses until both are set and Adam has signed.
+- Release policies have status `pending_og_mainnet_review`, and no signed attestation exists. The external attestation path refuses until both change.
+
+Deploy-time approval flow:
+1. Adam gives verbal approval of the exact candidate.
+2. `yarn evidence:galileo` (with `PERPDEX_NETWORK` set) prints the unsigned EIP-712 request.
+3. The request is signed with the deployer key and saved to `config/<profile>.release-attestation.local.json`.
+4. The gate lifts. Steps 3 and 4 happen only after the release policy status is set to `approved_for_og_mainnet_release` in a reviewed commit.
 - The Stork policies are `blocked_pending_reviewed_cross_feed_timestamp_spread`, with no runtime backend release bound.
 - Products and product reviews are `approved: false` / `pending_red_approval`. The contract packet commit/tree in the reviews is `null`.
 - Collateral provenance: `normalizedCarriedFieldTupleSha256` is `null` for both deployments, and USDZ `sources.bondSuperApp` is `null`. `loadTrackedCollateralProvenance` refuses while any null remains.
@@ -66,8 +72,7 @@ The fee policy (`config/og-mainnet.fee-policy.json`) is approved with bounds min
 
 | Input | File / pin |
 | --- | --- |
-| Adam's reviewer signing address | `pins` `releaseReviewer.address` + `config/og-mainnet*.release-policy.json` `reviewers` |
-| Adam's signed release attestation (deploy time) | `config/<profile>.release-attestation.local.json` |
+| Release policy activation + deployer-key-signed attestation after Adam's approval (deploy time) | `config/og-mainnet*.release-policy.json` `status`, `config/<profile>.release-attestation.local.json` |
 | Contract packet base commit/tree (the merged commit of this config) | product reviews `contractSource` + `pins.contractPacketBase` |
 | `normalizedCarriedFieldTupleSha256` (both deployments) | collateral provenance + `pins.normalizedCarriedFieldTupleSha256` |
 | Super-app registry source for USDZ (regenerate the super-app registry first; it predates USDZ) | `config/og-mainnet-usdz.collateral-provenance.json` `sources.bondSuperApp` |

@@ -17,7 +17,12 @@
   },
   "approvalMode": "external_reviewer_signature",
   "requiredReviewerSignatures": 1,
-  "reviewers": [],
+  "reviewers": [
+    {
+      "name": "Adam (deployer wallet)",
+      "address": "0x07b735E020549ba56AAb8e3370d102C2Df6cabF7"
+    }
+  ],
   "redApprovalArtifact": null,
   "mainnetExternalReviewRequired": true,
   "status": "pending_og_mainnet_review"

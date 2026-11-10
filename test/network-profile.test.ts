@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { utils } from 'ethers';
+import { assertIndependentReleaseReviewer } from '../scripts/release-attestation';
 import {
   assertDistinctVerifierQuorum,
   loadProducts,
@@ -44,7 +45,12 @@ describe('PerpDex network profiles', () => {
       expect(profile.deployerPrivateKeyEnv).to.equal('PERPDEX_OG_MAINNET_DEPLOYER_PRIVATE_KEY');
       expect(profile.operators.deployer).to.equal('0x07b735E020549ba56AAb8e3370d102C2Df6cabF7');
       expect(profile.approvalMode).to.equal('external_reviewer_signature');
-      expect(profile.releaseReviewer).to.deep.equal({ name: 'Adam', address: null });
+      // Adam delegated mainnet release review to the deployer key.
+      expect(profile.releaseReviewer).to.deep.equal({
+        name: 'Adam (deployer wallet)',
+        address: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7',
+        mayBeDeployer: true,
+      });
       expect(profile.files.redApproval).to.equal(null);
     }
   });
@@ -62,6 +68,19 @@ describe('PerpDex network profiles', () => {
       '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7'
     );
     expect(() => requirePinnedDeployer(deployer, mainnet)).to.throw('pinned deployer');
+    // Reviewer == deployer is allowed only through the explicit profile delegation;
+    // the default audited check and the sequencer check stay strict.
+    const mainnetDeployer = '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7';
+    const sequencer = '0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59';
+    expect(() =>
+      assertIndependentReleaseReviewer(mainnetDeployer, mainnetDeployer, sequencer, { allowDeployer: true })
+    ).not.to.throw();
+    expect(() => assertIndependentReleaseReviewer(mainnetDeployer, mainnetDeployer, sequencer)).to.throw(
+      'independent from the deployer'
+    );
+    expect(() =>
+      assertIndependentReleaseReviewer(sequencer, mainnetDeployer, sequencer, { allowDeployer: true })
+    ).to.throw('independent from the sequencer');
     expect(requirePinnedDeployer(deployer, PERPDEX_NETWORK_PROFILES.galileo)).to.equal(utils.getAddress(deployer));
   });
 
@@ -85,7 +104,10 @@ describe('PerpDex network profiles', () => {
       const release = readJson(profile.files.releasePolicy);
       expect(release.releaseId).to.equal(profile.releaseId);
       expect(release.status).not.to.equal(profile.activeReleaseStatus);
-      expect(release.reviewers).to.deep.equal([]);
+      expect(release.reviewers).to.deep.equal([
+        { name: 'Adam (deployer wallet)', address: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7' },
+      ]);
+      expect(release.reviewers[0].address).to.equal(utils.getAddress(release.reviewers[0].address));
       const fee = readJson(profile.files.feePolicy);
       expect(fee.status).to.equal(profile.activeReleaseStatus);
       expect(fee.requiredEnvironmentVariable).to.equal(profile.gasPriceEnv);

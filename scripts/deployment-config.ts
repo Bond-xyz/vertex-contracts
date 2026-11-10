@@ -36,7 +36,8 @@ export type PerpdexNetworkProfile = {
   activeReleaseStatus: string;
   operators: { deployer: string | null; sequencer: string | null; contractAdmin: string | null };
   // Pinned external release reviewer; a null address keeps the reviewer allowlist empty (blocked).
-  releaseReviewer: { name: string; address: string | null } | null;
+  // mayBeDeployer records an explicit delegation of review to the deployer key.
+  releaseReviewer: { name: string; address: string | null; mayBeDeployer: boolean } | null;
   // Endpoint.submitTransactionsChecked signs keccak(idx, transactions) with no
   // chainId or Endpoint address, so a batch signed for one deployment replays on
   // any other Endpoint whose nSubmissions matches. Deployments listed here must
@@ -189,8 +190,13 @@ const OG_MAINNET_SHARED = {
     sequencer: '0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59',
     contractAdmin: '0x7a3A932F1cc402941f3238292c80d138dA49Be25',
   },
-  // Operator-fill: Adam's reviewer signing address has not been provided yet.
-  releaseReviewer: { name: 'Adam', address: null },
+  // Adam delegated release review to the deployer key: he approves, then the
+  // attestation is signed with the deployer wallet. The sequencer stays independent.
+  releaseReviewer: {
+    name: 'Adam (deployer wallet)',
+    address: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7',
+    mayBeDeployer: true,
+  },
   decisions: {
     storkCoherence: 'approve_exact_og_mainnet_cross_feed_timestamp_spread',
     productReview: 'approve_og_mainnet_vectors_with_verified_stork_deploy_time_prices',

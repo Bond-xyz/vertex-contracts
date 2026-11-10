@@ -100,10 +100,13 @@ export async function collectAndVerifyReleaseApproval(input: ReleaseApprovalInpu
     deploymentIntentFile: input.deploymentIntentFile,
     repoRoot,
   });
+  // Mainnet review is delegated to the deployer key (profile releaseReviewer.mayBeDeployer);
+  // the reviewer must still differ from the sequencer.
   assertIndependentReleaseReviewer(
     verified.reviewer.address,
     verified.deploymentIntent.deployer,
-    verified.deploymentIntent.sequencer
+    verified.deploymentIntent.sequencer,
+    { allowDeployer: PERPDEX_NETWORK.releaseReviewer?.mayBeDeployer === true }
   );
   const productReview = validateProductApprovalReview(repoRoot, { requireApproved: true });
   return {

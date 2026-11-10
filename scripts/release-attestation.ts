@@ -618,11 +618,12 @@ export function verifySignedReleaseAttestation(
 export function assertIndependentReleaseReviewer(
   reviewerAddress: string,
   deployerAddress: string,
-  sequencerAddress: string
+  sequencerAddress: string,
+  options: { allowDeployer?: boolean } = {}
 ): void {
   const reviewer = utils.getAddress(reviewerAddress);
   for (const [role, operatorAddress] of [
-    ['deployer', deployerAddress],
+    ...(options.allowDeployer ? [] : ([['deployer', deployerAddress]] as const)),
     ['sequencer', sequencerAddress],
   ] as const) {
     if (reviewer === utils.getAddress(operatorAddress)) {
@@ -652,7 +653,9 @@ export function assertManifestOperatorsMatchSignedIntent(
   if (deployer !== evidence.deploymentIntent.deployer || sequencer !== evidence.deploymentIntent.sequencer) {
     throw new Error('deployment manifest operators do not match signed deployment intent');
   }
-  assertIndependentReleaseReviewer(evidence.reviewer.address, deployer, sequencer);
+  assertIndependentReleaseReviewer(evidence.reviewer.address, deployer, sequencer, {
+    allowDeployer: PERPDEX_NETWORK.releaseReviewer?.mayBeDeployer === true,
+  });
 }
 
 export async function collectUnsignedReleaseReviewRequest(input: {
