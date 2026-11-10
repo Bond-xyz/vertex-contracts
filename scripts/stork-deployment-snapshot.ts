@@ -9,7 +9,12 @@ import {
   PERPDEX_COLLATERAL_SYMBOL,
   carriedFieldTupleSha256,
   PERPDEX_NETWORK,
+  PERPDEX_NETWORK_PROFILES,
   PerpdexNetworkProfile,
+  SEQUENCER_RESERVED_TRADING_DATABASES,
+  SEQUENCER_TRADING_IMAGE_FLOOR_COMMIT,
+  SEQUENCER_TRADING_IMAGE_REPOSITORY,
+  SequencerLaneEvidence,
 } from './deployment-config';
 
 export const BACKEND_PROTOCOL_BASELINE_COMMIT = '1d174da2f130cf6f4f03b29029a002d92acc76f8';
@@ -580,6 +585,23 @@ export type GalileoStaticReleasePolicy = ReturnType<typeof loadTrackedStorkDeplo
   collateralProvenanceSha256: string;
 };
 
+const DEFAULT_QUOTE_DOMAIN = 'USDCE';
+const SAFE_REPO_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+const POSTGRES_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
+// Cloud SQL IAM user, URL-encoded (`<sa>%40<project>.iam`), proxy on loopback, no password.
+const IAM_DATABASE_URL =
+  /^postgresql:\/\/([a-z][a-z0-9-]*%40[a-z][a-z0-9-]*\.iam)@127\.0\.0\.1:5432\/([a-z][a-z0-9_]*)\?sslmode=disable$/;
+
+const safeRepoPath = (file: unknown): file is string =>
+  typeof file === 'string' && SAFE_REPO_PATH.test(file) && !file.split('/').some((part) => part === '..');
+
+/**
+ * Fail-closed sequencer leverage gate. Mainnet needs, for every lane (this profile
+ * and each distinct-quorum sibling): the reviewed runtime config bytes, the lane's
+ * workload environment (BOND_PERPS_ENV, quote domain, its own database) and the
+ * immutable Trading image it boots. Unresolved (null) values are reported by name.
+ */
 export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile): void {
   const gate = profile.sequencerLeverageEvidence;
   if (!gate.required) {
@@ -600,8 +622,6 @@ export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile):
   requireGitObject(evidence.tree, 'sequencer runtime config tree');
   const lanes = evidence.lanes.map((lane) => lane.deployment).sort();
   const expectedLanes = [profile.name, ...profile.distinctVerifierQuorumFrom].sort();
-  const safePath = (file: string) =>
-    /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(file) && !file.split('/').some((part) => part === '..');
   if (
     typeof evidence.repository !== 'string' ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(evidence.repository) ||
@@ -613,9 +633,10 @@ export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile):
     JSON.stringify(lanes) !== JSON.stringify(expectedLanes) ||
     evidence.lanes.some(
       (lane) =>
+        !Array.isArray(lane.files) ||
         lane.files.length === 0 ||
         new Set(lane.files.map((file) => file.path)).size !== lane.files.length ||
-        lane.files.some((file) => typeof file.path !== 'string' || !safePath(file.path))
+        lane.files.some((file) => !safeRepoPath(file.path))
     )
   ) {
     throw new Error(`${profile.name} sequencer runtime config evidence does not preserve the reviewed leverage cap`);
@@ -625,6 +646,103 @@ export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile):
       requireGitObject(file.blob, `${lane.deployment} ${file.path} blob`);
       requireSha256(file.sha256, `${lane.deployment} ${file.path} SHA-256`);
     }
+  }
+  assertSequencerLaneBindings(profile, evidence.lanes);
+}
+
+function assertSequencerLaneBindings(profile: PerpdexNetworkProfile, lanes: readonly SequencerLaneEvidence[]): void {
+  const unresolved: string[] = [];
+  const configs = new Map<string, string>();
+  const configBytes = new Map<string, string>();
+  const databases = new Map<string, string>();
+  const iamUsers = new Map<string, string>();
+  for (const lane of lanes) {
+    const id = `${profile.name} sequencer lane ${lane.deployment}`;
+    const laneProfile = PERPDEX_NETWORK_PROFILES[lane.deployment];
+    const mismatch = (what: string): never => {
+      throw new Error(`${id} ${what}`);
+    };
+    // Runtime config: one listed file, inside this lane's own directory.
+    const runtime =
+      (safeRepoPath(lane.runtimeConfigPath) && lane.files.find((file) => file.path === lane.runtimeConfigPath)) ||
+      mismatch('runtime config is not one of its reviewed files');
+    if (!lane.runtimeConfigPath.split('/').slice(0, -1).includes(lane.deployment)) {
+      mismatch(`runtime config ${lane.runtimeConfigPath} is not under a ${lane.deployment} lane directory`);
+    }
+    if (configs.has(lane.runtimeConfigPath) || configBytes.has(runtime.blob)) {
+      mismatch(
+        `runtime config is shared with lane ${configs.get(lane.runtimeConfigPath) ?? configBytes.get(runtime.blob)}`
+      );
+    }
+    configs.set(lane.runtimeConfigPath, lane.deployment);
+    configBytes.set(runtime.blob, lane.deployment);
+
+    // Workload environment: production, this lane's own quote domain.
+    const env = lane.environment;
+    if (env === null || typeof env !== 'object') mismatch('workload environment is missing');
+    if (env.bondPerpsEnv !== 'prod') mismatch(`BOND_PERPS_ENV must be prod, not ${JSON.stringify(env.bondPerpsEnv)}`);
+    if (env.quoteDomain !== laneProfile.collateral.assetId) {
+      mismatch(
+        `quote domain ${JSON.stringify(env.quoteDomain)} does not match its collateral ${
+          laneProfile.collateral.assetId
+        }`
+      );
+    }
+    if (env.separateQuoteBooksEnabled !== (env.quoteDomain !== DEFAULT_QUOTE_DOMAIN)) {
+      mismatch('PERPDEX_SEPARATE_QUOTE_BOOKS_ENABLED must be true exactly for a non-USDCE quote domain');
+    }
+    if (env.database === null) {
+      unresolved.push(`${lane.deployment} DATABASE_URL identity`);
+    } else {
+      const { name, iamUser, url } = env.database;
+      const parsed = typeof url === 'string' ? IAM_DATABASE_URL.exec(url) : null;
+      if (
+        typeof name !== 'string' ||
+        !POSTGRES_IDENTIFIER.test(name) ||
+        parsed === null ||
+        parsed[1] !== iamUser ||
+        parsed[2] !== name
+      ) {
+        mismatch('DATABASE_URL is not a passwordless Cloud SQL IAM URL for its named database');
+      }
+      if (SEQUENCER_RESERVED_TRADING_DATABASES.includes(name)) {
+        mismatch(`database ${name} belongs to the live private-beta lineage`);
+      }
+      if (databases.has(name)) mismatch(`database ${name} is shared with lane ${databases.get(name)}`);
+      if (iamUsers.has(iamUser)) mismatch(`database IAM user is shared with lane ${iamUsers.get(iamUser)}`);
+      databases.set(name, lane.deployment);
+      iamUsers.set(iamUser, lane.deployment);
+    }
+
+    // Immutable Trading artifact at or after the engine floor.
+    const artifact = lane.tradingArtifact;
+    if (artifact === null || typeof artifact !== 'object') mismatch('Trading artifact is missing');
+    if (artifact.repository !== SEQUENCER_TRADING_IMAGE_REPOSITORY) {
+      mismatch(`Trading image repository must be ${SEQUENCER_TRADING_IMAGE_REPOSITORY}`);
+    }
+    const artifactFields = [artifact.digest, artifact.sourceCommit, artifact.sourceTree, artifact.publicationRunId];
+    if (artifactFields.some((value) => value === null)) {
+      if (artifactFields.some((value) => value !== null)) {
+        mismatch(
+          'Trading artifact is partially resolved; digest, source commit, tree and publication run bind together'
+        );
+      }
+      unresolved.push(
+        `${lane.deployment} Trading image digest (>= ${SEQUENCER_TRADING_IMAGE_FLOOR_COMMIT.slice(0, 8)})`
+      );
+      continue;
+    }
+    if (typeof artifact.digest !== 'string' || !IMAGE_DIGEST.test(artifact.digest)) {
+      mismatch('Trading image digest must be sha256:<64 lowercase hex>');
+    }
+    requireGitObject(String(artifact.sourceCommit), `${lane.deployment} Trading image source commit`);
+    requireGitObject(String(artifact.sourceTree), `${lane.deployment} Trading image source tree`);
+    if (!/^[1-9][0-9]{0,19}$/.test(String(artifact.publicationRunId))) {
+      mismatch('Trading image publication run must be an Actions run id');
+    }
+  }
+  if (unresolved.length > 0) {
+    throw new Error(`${profile.name} sequencer lane evidence is unresolved: ${unresolved.join('; ')}`);
   }
 }
 

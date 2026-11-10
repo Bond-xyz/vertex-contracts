@@ -78,9 +78,12 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.storkSpread).to.equal(3);
       expect(results.storkStatus).to.equal('approved_for_og_mainnet_release');
       expect(results.storkDecision).to.equal('approve_exact_og_mainnet_cross_feed_timestamp_spread');
-      // The 1x sequencer evidence gate is the first release-preparation refusal.
+      // The sequencer lane gate is the first release-preparation refusal: lane
+      // configs are pinned, but Trading image digests and lane databases are not.
       expect(results.staticReleasePolicy).to.equal(
-        `${profile} backend sequencer 1x runtime config evidence is unresolved`
+        `${profile} sequencer lane evidence is unresolved: ` +
+          'og-mainnet DATABASE_URL identity; og-mainnet Trading image digest (>= d7b15fd7); ' +
+          'og-mainnet-usdz DATABASE_URL identity; og-mainnet-usdz Trading image digest (>= d7b15fd7)'
       );
     });
   }

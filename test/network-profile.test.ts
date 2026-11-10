@@ -18,6 +18,7 @@ import {
   resolveSequencer,
 } from '../scripts/deployment-config';
 import { assertSequencerLeverageEvidence } from '../scripts/stork-deployment-snapshot';
+import { RESOLVED_LANES, SequencerEvidence, withSequencerEvidence } from './helpers/sequencer-lanes';
 
 const root = path.resolve(__dirname, '..');
 const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
@@ -211,9 +212,11 @@ describe('PerpDex network profiles', () => {
     expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
     fs.unlinkSync(file);
     for (const profile of [mainnet, usdz]) {
-      expect(() => assertSequencerLeverageEvidence(profile)).to.throw(
-        'sequencer 1x runtime config evidence is unresolved'
-      );
+      expect(() => assertSequencerLeverageEvidence(profile)).to.throw('sequencer lane evidence is unresolved');
+      // The pre-lane shape (no evidence at all) still fails closed.
+      expect(() =>
+        assertSequencerLeverageEvidence({ ...profile, sequencerLeverageEvidence: { required: true, evidence: null } })
+      ).to.throw('sequencer 1x runtime config evidence is unresolved');
     }
     expect(() => assertSequencerLeverageEvidence(PERPDEX_NETWORK_PROFILES.galileo)).not.to.throw();
     // A mainnet profile cannot switch the gate off.
@@ -222,29 +225,14 @@ describe('PerpDex network profiles', () => {
         assertSequencerLeverageEvidence({ ...profile, sequencerLeverageEvidence: { required: false, evidence: null } })
       ).to.throw('gate must stay required');
     }
-    const file0 = { path: 'services/trading/run/config.toml', blob: 'a'.repeat(40), sha256: 'b'.repeat(64) };
-    type Evidence = NonNullable<typeof mainnet.sequencerLeverageEvidence.evidence>;
+    const [usdcLane, usdzLane] = RESOLVED_LANES;
+    const file0 = usdcLane.files[0];
     const evidence = (shortOpeningCollateralPpb: number, maxLeverage = 1, overrides: Record<string, unknown> = {}) =>
-      ({
-        ...mainnet,
-        sequencerLeverageEvidence: {
-          required: true,
-          evidence: {
-            repository: 'Bond-xyz/bond-perpdex',
-            commit: 'c'.repeat(40),
-            tree: 'd'.repeat(40),
-            maxLeverage,
-            shortOpeningCollateralPpb,
-            shortAdmissionBasis: 'post_fill_initial_health_at_oracle_mark',
-            feesReservedSeparately: true,
-            lanes: [
-              { deployment: 'og-mainnet', files: [file0] },
-              { deployment: 'og-mainnet-usdz', files: [file0] },
-            ],
-            ...overrides,
-          } as Evidence,
-        },
-      } as typeof mainnet);
+      withSequencerEvidence(mainnet, {
+        maxLeverage,
+        shortOpeningCollateralPpb,
+        ...overrides,
+      } as Partial<SequencerEvidence>);
     expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001))).not.to.throw();
     // The integer 1x cap alone (exact-notional short reserve) is not sufficient.
     expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_000))).to.throw('does not preserve');
@@ -258,25 +246,10 @@ describe('PerpDex network profiles', () => {
       { feesReservedSeparately: undefined },
       { repository: '' },
       { repository: 'not a repo' },
-      { lanes: [{ deployment: 'og-mainnet', files: [file0] }] },
-      {
-        lanes: [
-          { deployment: 'og-mainnet', files: [file0, file0] },
-          { deployment: 'og-mainnet-usdz', files: [file0] },
-        ],
-      },
-      {
-        lanes: [
-          { deployment: 'og-mainnet', files: [{ ...file0, path: '../config.toml' }] },
-          { deployment: 'og-mainnet-usdz', files: [file0] },
-        ],
-      },
-      {
-        lanes: [
-          { deployment: 'og-mainnet', files: [{ ...file0, path: '/etc/config.toml' }] },
-          { deployment: 'og-mainnet-usdz', files: [file0] },
-        ],
-      },
+      { lanes: [usdcLane] },
+      { lanes: [{ ...usdcLane, files: [file0, file0] }, usdzLane] },
+      { lanes: [{ ...usdcLane, files: [{ ...file0, path: '../config.toml' }] }, usdzLane] },
+      { lanes: [{ ...usdcLane, files: [{ ...file0, path: '/etc/config.toml' }] }, usdzLane] },
     ]) {
       expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 1, overrides))).to.throw(
         'does not preserve'
@@ -284,12 +257,7 @@ describe('PerpDex network profiles', () => {
     }
     expect(() =>
       assertSequencerLeverageEvidence(
-        evidence(1_000_000_001, 1, {
-          lanes: [
-            { deployment: 'og-mainnet', files: [{ ...file0, blob: 'z'.repeat(40) }] },
-            { deployment: 'og-mainnet-usdz', files: [file0] },
-          ],
-        })
+        evidence(1_000_000_001, 1, { lanes: [{ ...usdcLane, files: [{ ...file0, blob: 'z'.repeat(40) }] }, usdzLane] })
       )
     ).to.throw();
   });
