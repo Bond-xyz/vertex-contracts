@@ -7,6 +7,7 @@ import {
   PERPDEX_COLLATERAL_ADDRESS,
   PERPDEX_COLLATERAL_DECIMALS,
   PERPDEX_COLLATERAL_SYMBOL,
+  carriedFieldTupleSha256,
   PERPDEX_NETWORK,
   PerpdexNetworkProfile,
 } from './deployment-config';
@@ -347,7 +348,17 @@ export function loadTrackedCollateralProvenance(
       `collateral provenance must statically pin exact ${PERPDEX_NETWORK.name} ${PERPDEX_COLLATERAL_SYMBOL} product 0`
     );
   }
-  if (provenance.normalizedCarriedFieldTupleSha256 !== pins.normalizedCarriedFieldTupleSha256) {
+  if (
+    provenance.normalizedCarriedFieldTupleSha256 !== pins.normalizedCarriedFieldTupleSha256 ||
+    (pins.carriedFieldTupleDerivation === 'canonical_json_v1' &&
+      provenance.normalizedCarriedFieldTupleSha256 !==
+        carriedFieldTupleSha256({
+          provenanceId: provenance.provenanceId,
+          chainId: provenance.chainId,
+          collateral: provenance.collateral,
+          selection: provenance.selection,
+        }))
+  ) {
     throw new Error('normalized collateral carried-field tuple binding mismatch');
   }
   if (

@@ -15,7 +15,7 @@
     "mockOrReplacementDeploymentAllowed": false,
     "provenanceOnly": true
   },
-  "normalizedCarriedFieldTupleSha256": null,
+  "normalizedCarriedFieldTupleSha256": "af864f08686bac0ec415679d416f9353c3aedfd43d442a95d22ca259516c1371",
   "sources": {
     "bondEnvironments": {
       "repository": "Bond-xyz/bond-shared-registry",

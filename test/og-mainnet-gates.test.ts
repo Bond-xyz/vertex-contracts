@@ -50,7 +50,12 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.foreignDeployer).to.include('pinned');
       expect(results.foreignSequencer).to.include('pinned');
       expect(results.feePolicy).to.equal('ok');
-      expect(results.provenance).to.include('unresolved operator-fill fields');
+      if (profile === 'og-mainnet') {
+        expect(results.provenance).to.equal('ok');
+      } else {
+        // USDZ is still missing from the super-app generated registry.
+        expect(results.provenance).to.include('unresolved operator-fill fields: sources.bondSuperApp.commit');
+      }
     });
   }
 });
