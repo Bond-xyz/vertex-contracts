@@ -100,6 +100,23 @@ The provenance (`profile.storkAggregator.provenance`, copied verbatim into each 
 
 Blob and SHA-256 values are pinned per file. A policy whose key or provenance doesn't match the profile is refused.
 
+## Launch risk: exactly 1x (Red = Adam)
+
+Both mainnet deployments launch at a maximum of **1x leverage**. Perp initial health is `quote + vQuote + Σ amount·price·weight`, with the weights taken from `RiskHelper._getWeightX18`. Opening a long of notional N against collateral Q therefore leaves initial health `Q − N·(1 − longWeightInitial)`, and a short leaves `Q − N·(shortWeightInitial − 1)`. For exactly 1x:
+
+| weight (×1e9) | og-mainnet / og-mainnet-usdz | Galileo |
+| --- | --- | --- |
+| longWeightInitial | 0 | 950_000_000 |
+| shortWeightInitial | 2_000_000_000 | 1_050_000_000 |
+| longWeightMaintenance | 500_000_000 | 975_000_000 |
+| shortWeightMaintenance | 1_500_000_000 | 1_025_000_000 |
+
+The initial weights sit exactly on the audited `loadProducts` bounds (`longWeightInitial ≥ 0`, `shortWeightInitial ≤ 2e9`). Maintenance keeps Galileo's half-of-initial ratio (50% maintenance margin). `profile.riskModel` pins these values, the product-review validator enforces them, and `test/og-mainnet-1x-risk.test.ts` proves that 1x sits on the health boundary and anything above 1x is negative.
+
+**Insurance fund:** the deployment config has no insurance setting. `Clearinghouse.insurance` starts at 0 and only changes through owner `depositInsurance`, which this pipeline never calls. Insurance is therefore zero at launch.
+
+**Stork:** Red (Adam) approved a 3-second cross-feed signed-timestamp spread for both deployments. The runtime backend release binding is still pending.
+
 ## Running the two deployments
 
 The OpenZeppelin network manifest path is fixed per chain (`.openzeppelin/unknown-16661.json`), and preparation requires it to be absent. Run each mainnet deployment from its own clean checkout, with its own `.env.<profile>.local`.

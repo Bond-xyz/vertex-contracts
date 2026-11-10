@@ -34,9 +34,9 @@
     "snapshotRequiredBeforeFirstPriceBearingTransaction": true
   },
   "riskModel": {
-    "initialMarginPercent": "5",
-    "maintenanceMarginPercent": "2.5",
-    "maximumLeverage": "20",
+    "initialMarginPercent": "100",
+    "maintenanceMarginPercent": "50",
+    "maximumLeverage": "1",
     "weightStorageDecimals": 9,
     "contractWeightDecimals": 18
   },
@@ -109,10 +109,10 @@
   },
   "blockers": [],
   "approval": {
-    "approved": false,
+    "approved": true,
     "approver": "Red",
-    "decision": "pending_red_approval",
-    "approvedAt": null,
-    "recordedScope": "0G mainnet USDZ deployment only; exact Galileo sizing and 20x risk retained; no fixed deploy-time prices"
+    "decision": "approve_og_mainnet_vectors_with_verified_stork_deploy_time_prices",
+    "approvedAt": "2026-11-10T20:07:26Z",
+    "recordedScope": "0G mainnet USDZ deployment only; exact Galileo sizing; 1x maximum leverage (Red = Adam); no fixed deploy-time prices"
   }
 }

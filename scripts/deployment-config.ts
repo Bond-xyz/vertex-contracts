@@ -35,6 +35,19 @@ export type PerpdexNetworkProfile = {
   marketSymbols: readonly [string, string, string, string];
   approvalMode: ReleaseApprovalMode;
   activeReleaseStatus: string;
+  // Initial-health weights cap leverage: long max = 1 / (1 - longWeightInitial),
+  // short max = 1 / (shortWeightInitial - 1) (weights scaled by 1e9).
+  riskModel: {
+    initialMarginPercent: string;
+    maintenanceMarginPercent: string;
+    maximumLeverage: string;
+    weights: {
+      longWeightInitial: number;
+      shortWeightInitial: number;
+      longWeightMaintenance: number;
+      shortWeightMaintenance: number;
+    };
+  };
   operators: { deployer: string | null; sequencer: string | null; contractAdmin: string | null };
   // Pinned external release reviewer; a null address keeps the reviewer allowlist empty (blocked).
   // mayBeDeployer records an explicit delegation of review to the deployer key.
@@ -115,6 +128,17 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
   marketSymbols: ['BTCUSDCPERP', 'ETHUSDCPERP', 'SOLUSDCPERP', '0GUSDCPERP'],
   approvalMode: 'tracked_red_testnet_approval',
   activeReleaseStatus: 'approved_for_galileo_testnet_release',
+  riskModel: {
+    initialMarginPercent: '5',
+    maintenanceMarginPercent: '2.5',
+    maximumLeverage: '20',
+    weights: {
+      longWeightInitial: 950_000_000,
+      shortWeightInitial: 1_050_000_000,
+      longWeightMaintenance: 975_000_000,
+      shortWeightMaintenance: 1_025_000_000,
+    },
+  },
   operators: { deployer: null, sequencer: null, contractAdmin: null },
   releaseReviewer: null,
   storkAggregator: {
@@ -207,6 +231,20 @@ const OG_MAINNET_SHARED = {
   explorer: 'https://chainscan.0g.ai',
   approvalMode: 'external_reviewer_signature' as const,
   activeReleaseStatus: 'approved_for_og_mainnet_release',
+  // Red (Adam): mainnet launches at exactly 1x. 100% initial margin means
+  // longWeightInitial 0 and shortWeightInitial 2.0; maintenance keeps Galileo's
+  // half-of-initial ratio (50%).
+  riskModel: {
+    initialMarginPercent: '100',
+    maintenanceMarginPercent: '50',
+    maximumLeverage: '1',
+    weights: {
+      longWeightInitial: 0,
+      shortWeightInitial: 2_000_000_000,
+      longWeightMaintenance: 500_000_000,
+      shortWeightMaintenance: 1_500_000_000,
+    },
+  },
   operators: {
     deployer: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7',
     sequencer: '0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59',
@@ -358,6 +396,7 @@ function ogMainnetProfile(input: {
     ],
     approvalMode: OG_MAINNET_SHARED.approvalMode,
     activeReleaseStatus: OG_MAINNET_SHARED.activeReleaseStatus,
+    riskModel: OG_MAINNET_SHARED.riskModel,
     operators: OG_MAINNET_SHARED.operators,
     releaseReviewer: OG_MAINNET_SHARED.releaseReviewer,
     storkAggregator: OG_MAINNET_SHARED.storkAggregator,

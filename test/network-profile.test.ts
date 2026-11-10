@@ -88,8 +88,9 @@ describe('PerpDex network profiles', () => {
   it('keeps mainnet config files bound to their own profile', () => {
     for (const profile of [mainnet, usdz]) {
       const products = loadProducts(path.join(root, profile.files.products), { requireApproved: false, profile });
-      expect(products.approved).to.equal(false);
-      expect(() => loadProducts(path.join(root, profile.files.products), { profile })).to.throw('not approved');
+      // Red (Adam) approved the 1x mainnet vectors.
+      expect(products.approved).to.equal(true);
+      expect(() => loadProducts(path.join(root, profile.files.products), { profile })).not.to.throw();
       expect(() =>
         loadProducts(path.join(root, PERPDEX_NETWORK_PROFILES.galileo.files.products), { profile })
       ).to.throw('chainId must be 16661');
