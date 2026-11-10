@@ -8,13 +8,13 @@
     "symbol": "USDZ",
     "decimals": 6,
     "provenanceFile": "config/og-mainnet-usdz.collateral-provenance.json",
-    "provenanceSha256": "c4fd619b76cb55c7a8e4ec0c98d372a6fa2b42df9457e6161a04e567ac8191f1",
+    "provenanceSha256": "211882f3fab81b1d8c0f3a0af6f29b7b799535e40808e71472f4383b9af1d348",
     "selectionMode": "static_pinned"
   },
   "contractSource": {
     "repository": "Bond-xyz/vertex-contracts",
-    "releaseCommit": null,
-    "releaseTree": null,
+    "releaseCommit": "15287abc32072de7cbe820119682dce73e044eb1",
+    "releaseTree": "a9cbb18229e9ce65c23cd413339036fc2b44971c",
     "productsFile": "config/og-mainnet-usdz.products.json"
   },
   "rustSource": {

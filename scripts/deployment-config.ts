@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { BigNumber, utils } from 'ethers';
@@ -55,6 +56,9 @@ export type PerpdexNetworkProfile = {
     feeBoundsWei: { minimum: bigint; default: bigint; maximum: bigint } | null;
     contractPacketBase: { commit: string; tree: string } | null;
     normalizedCarriedFieldTupleSha256: string | null;
+    // 'legacy_literal': reviewed Galileo value, algorithm not reproducible in-repo.
+    // 'canonical_json_v1': carriedFieldTupleSha256 recomputed from the provenance file.
+    carriedFieldTupleDerivation: 'legacy_literal' | 'canonical_json_v1';
     collateralProvenanceSources: CollateralProvenanceSourcePins;
   };
   files: {
@@ -120,6 +124,7 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
       tree: 'fa7c4782c141c55ab8ecfa51a297bec1c6a4c43f',
     },
     normalizedCarriedFieldTupleSha256: 'b385d558b2000cf9cba3db74746e855fddc546464e7c172b338b662823719f7a',
+    carriedFieldTupleDerivation: 'legacy_literal',
     collateralProvenanceSources: {
       bondEnvironments: {
         repository: 'Bond-xyz/bond-environments',
@@ -202,11 +207,13 @@ const OG_MAINNET_SHARED = {
     productReview: 'approve_og_mainnet_vectors_with_verified_stork_deploy_time_prices',
   },
   // Bounds around the observed 4000000007 wei eth_gasPrice at 0G mainnet block
-  // 49846964 (same structure as Galileo). Operator-fill: no merged contract
-  // packet commit and no reproducible carried-field tuple algorithm exist yet.
+  // 49846964 (same structure as Galileo).
   feeBoundsWei: { minimum: 2_000_000_007n, default: 4_000_000_007n, maximum: 20_000_000_000n },
-  contractPacketBase: null,
-  normalizedCarriedFieldTupleSha256: null,
+  // Merged og-mainnet deployment packet (PR #25) on bond/galileo-refork.
+  contractPacketBase: {
+    commit: '15287abc32072de7cbe820119682dce73e044eb1',
+    tree: 'a9cbb18229e9ce65c23cd413339036fc2b44971c',
+  },
   sharedFiles: {
     contractBaseline: 'config/og-mainnet.contract-baseline.json',
     feePolicy: 'config/og-mainnet.fee-policy.json',
@@ -225,6 +232,50 @@ const OG_MAINNET_REGISTRY_SOURCE = {
   provisionMode: 'existing',
   autoDeploy: false,
 };
+
+export const STATIC_PINNED_COLLATERAL_SELECTION = {
+  mode: 'static_pinned',
+  runtimeRegistryLookup: false,
+  aliasSubstitutionAllowed: false,
+  mockOrReplacementDeploymentAllowed: false,
+  provenanceOnly: true,
+} as const;
+
+export type CarriedCollateralFields = {
+  provenanceId: string;
+  chainId: number;
+  collateral: { address: string; symbol: string; decimals: number; productId: number };
+  selection: Record<string, unknown>;
+};
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
+}
+
+// canonical_json_v1: SHA-256 (hex) of the UTF-8 canonical JSON (keys sorted
+// recursively, no whitespace) of exactly { provenanceId, chainId,
+// collateral: { address (EIP-55 checksum), symbol, decimals, productId }, selection }.
+// It does not reproduce the legacy Galileo literal; Galileo keeps that pin.
+export function carriedFieldTupleSha256(fields: CarriedCollateralFields): string {
+  const tuple = {
+    provenanceId: fields.provenanceId,
+    chainId: fields.chainId,
+    collateral: {
+      address: utils.getAddress(fields.collateral.address),
+      symbol: fields.collateral.symbol,
+      decimals: fields.collateral.decimals,
+      productId: fields.collateral.productId,
+    },
+    selection: fields.selection,
+  };
+  return crypto.createHash('sha256').update(canonicalJson(tuple), 'utf8').digest('hex');
+}
 
 function ogMainnetProfile(input: {
   name: 'og-mainnet' | 'og-mainnet-usdz';
@@ -273,7 +324,19 @@ function ogMainnetProfile(input: {
     pins: {
       feeBoundsWei: OG_MAINNET_SHARED.feeBoundsWei,
       contractPacketBase: OG_MAINNET_SHARED.contractPacketBase,
-      normalizedCarriedFieldTupleSha256: OG_MAINNET_SHARED.normalizedCarriedFieldTupleSha256,
+      // Per collateral: each deployment's tuple covers its own provenance id and token.
+      normalizedCarriedFieldTupleSha256: carriedFieldTupleSha256({
+        provenanceId: `bond-${input.name}-${input.collateral.assetId.toLowerCase()}-product-zero`,
+        chainId: OG_MAINNET_CHAIN_ID,
+        collateral: {
+          address: input.collateral.address,
+          symbol: input.collateral.symbol,
+          decimals: input.collateral.decimals,
+          productId: input.collateral.productId,
+        },
+        selection: STATIC_PINNED_COLLATERAL_SELECTION,
+      }),
+      carriedFieldTupleDerivation: 'canonical_json_v1',
       collateralProvenanceSources: {
         bondEnvironments: {
           ...OG_MAINNET_REGISTRY_SOURCE,

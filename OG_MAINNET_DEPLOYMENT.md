@@ -59,8 +59,18 @@ Deploy-time approval flow:
 3. The request is signed with the deployer key and saved to `config/<profile>.release-attestation.local.json`.
 4. The gate lifts. Steps 3 and 4 happen only after the release policy status is set to `approved_for_og_mainnet_release` in a reviewed commit.
 - The Stork policies are `blocked_pending_reviewed_cross_feed_timestamp_spread`, with no runtime backend release bound.
-- Products and product reviews are `approved: false` / `pending_red_approval`. The contract packet commit/tree in the reviews is `null`.
-- Collateral provenance: `normalizedCarriedFieldTupleSha256` is `null` for both deployments, and USDZ `sources.bondSuperApp` is `null`. `loadTrackedCollateralProvenance` refuses while any null remains.
+- Products and product reviews are `approved: false` / `pending_red_approval`. The reviews pin the merged contract packet `15287abc32072de7cbe820119682dce73e044eb1` (tree `a9cbb18229e9ce65c23cd413339036fc2b44971c`).
+- Collateral provenance: USDZ `sources.bondSuperApp` is still `null`, because the super-app generated registry has no USDZ entry yet. `loadTrackedCollateralProvenance` refuses while any null remains.
+
+### Carried-field tuple hash (`canonical_json_v1`)
+
+For mainnet, `normalizedCarriedFieldTupleSha256` is computed by `carriedFieldTupleSha256` (`scripts/deployment-config.ts`). The input is a tuple of exactly these fields from the provenance file:
+- `provenanceId`
+- `chainId`
+- `collateral`: `address` (EIP-55 checksum), `symbol`, `decimals`, `productId`
+- `selection`
+
+The tuple is serialized as canonical JSON (keys sorted recursively, no whitespace, UTF-8), and the hash is the hex SHA-256 of that string. Each collateral profile gets its own value: og-mainnet `af864f08…1371`, og-mainnet-usdz `d111b00f…5855`. `loadTrackedCollateralProvenance` recomputes the hash from the file and requires it to equal the profile pin. Galileo keeps its reviewed legacy literal (`legacy_literal`); this derivation does not reproduce that value.
 - The deployer balance must be funded before the first transaction.
 - `bind-galileo-backend-runtime.ts` and `generate-testnet-verifier-keys.ts` are Galileo-only.
 
@@ -73,8 +83,6 @@ The fee policy (`config/og-mainnet.fee-policy.json`) is approved with bounds min
 | Input | File / pin |
 | --- | --- |
 | Release policy activation + deployer-key-signed attestation after Adam's approval (deploy time) | `config/og-mainnet*.release-policy.json` `status`, `config/<profile>.release-attestation.local.json` |
-| Contract packet base commit/tree (the merged commit of this config) | product reviews `contractSource` + `pins.contractPacketBase` |
-| `normalizedCarriedFieldTupleSha256` (both deployments) | collateral provenance + `pins.normalizedCarriedFieldTupleSha256` |
 | Super-app registry source for USDZ (regenerate the super-app registry first; it predates USDZ) | `config/og-mainnet-usdz.collateral-provenance.json` `sources.bondSuperApp` |
 | Stork cross-feed spread decision and runtime backend release | `config/og-mainnet*.stork-deployment-policy.json` |
 | Red approval of products and product vectors | `config/og-mainnet*.products.json`, `*.product-approval-review.json` |

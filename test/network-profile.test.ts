@@ -6,6 +6,7 @@ import { utils } from 'ethers';
 import { assertIndependentReleaseReviewer } from '../scripts/release-attestation';
 import {
   assertDistinctVerifierQuorum,
+  carriedFieldTupleSha256,
   loadProducts,
   loadVerifierConfig,
   OG_MAINNET_CHAIN_ID,
@@ -154,6 +155,34 @@ describe('PerpDex network profiles', () => {
     expect(() => assertDistinctVerifierQuorum(oneShared, mainnet)).to.throw('shares 2 key(s) with og-mainnet-usdz');
     const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-quorum-'));
     expect(() => assertDistinctVerifierQuorum(usdzQuorum, usdz, emptyRoot)).to.throw('og-mainnet config is missing');
+  });
+
+  it('derives a distinct canonical_json_v1 carried-field tuple hash per mainnet collateral', () => {
+    const hashes = [mainnet, usdz].map((profile) => {
+      const provenance = readJson(profile.files.collateralProvenance);
+      const derived = carriedFieldTupleSha256(provenance);
+      expect(profile.pins.carriedFieldTupleDerivation).to.equal('canonical_json_v1');
+      expect(derived).to.equal(profile.pins.normalizedCarriedFieldTupleSha256);
+      expect(provenance.normalizedCarriedFieldTupleSha256).to.equal(derived);
+      expect(carriedFieldTupleSha256({ ...provenance, provenanceId: `${provenance.provenanceId}-x` })).not.to.equal(
+        derived
+      );
+      return derived;
+    });
+    expect(hashes[0]).not.to.equal(hashes[1]);
+    expect(PERPDEX_NETWORK_PROFILES.galileo.pins.carriedFieldTupleDerivation).to.equal('legacy_literal');
+  });
+
+  it('pins both mainnet product reviews to the merged contract packet', () => {
+    for (const profile of [mainnet, usdz]) {
+      expect(profile.pins.contractPacketBase).to.deep.equal({
+        commit: '15287abc32072de7cbe820119682dce73e044eb1',
+        tree: 'a9cbb18229e9ce65c23cd413339036fc2b44971c',
+      });
+      const review = readJson(profile.files.productReview);
+      expect(review.contractSource.releaseCommit).to.equal(profile.pins.contractPacketBase?.commit);
+      expect(review.contractSource.releaseTree).to.equal(profile.pins.contractPacketBase?.tree);
+    }
   });
 
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {
