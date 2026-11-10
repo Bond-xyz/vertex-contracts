@@ -107,11 +107,18 @@ Both mainnet deployments launch at a maximum of **1x leverage**. Perp initial he
 | weight (×1e9) | og-mainnet / og-mainnet-usdz | Galileo |
 | --- | --- | --- |
 | longWeightInitial | 0 | 950_000_000 |
-| shortWeightInitial | 2_000_000_000 | 1_050_000_000 |
+| shortWeightInitial | 2_000_000_001 | 1_050_000_000 |
 | longWeightMaintenance | 500_000_000 | 975_000_000 |
 | shortWeightMaintenance | 1_500_000_000 | 1_025_000_000 |
 
-The initial weights sit exactly on the audited `loadProducts` bounds (`longWeightInitial ≥ 0`, `shortWeightInitial ≤ 2e9`). Maintenance keeps Galileo's half-of-initial ratio (50% maintenance margin). `profile.riskModel` pins these values, the product-review validator enforces them, and `test/og-mainnet-1x-risk.test.ts` proves that 1x sits on the health boundary and anything above 1x is negative.
+Longs are capped at exactly 1x. `shortWeightInitial` is 2.000000001, not 2.0, because `BaseEngine.getHealthContribution` treats weight `2 * ONE` as its spot-short sentinel and returns `int128.min`. Shorts are therefore capped at 1/1.000000001x. `loadProducts` always refuses `shortWeightInitial == 2e9`, and the ceiling is profile-scoped: Galileo keeps 2e9 and mainnet allows exactly 2_000_000_001. Maintenance keeps Galileo's half-of-initial ratio (50% maintenance margin). `profile.riskModel` pins these values, the product-review validator enforces them, `test/og-mainnet-1x-contract.test.ts` checks this against the real contract health math:
+- the 2e9 sentinel regression;
+- the exact 1x long boundary;
+- a full 1x short is refused;
+- a 1x short becomes liquidatable at +33.3%;
+- with zero insurance, bad debt is socialized across open interest.
+
+**Sequencer cap gate:** `OffchainExchange` matching does not enforce health, so the sequencer's `max_leverage` is what actually enforces 1x. `assertSequencerLeverageEvidence` (first step of `collectGalileoStaticReleasePolicy`) refuses mainnet until `profile.sequencerLeverageEvidence.evidence` is set. It must pin the reviewed production trading runtime config (repository, commit, tree, and per-file blob and SHA-256) with `maxLeverage = 1` for both lanes (`og-mainnet` and `og-mainnet-usdz`).
 
 **Insurance fund:** the deployment config has no insurance setting. `Clearinghouse.insurance` starts at 0 and only changes through owner `depositInsurance`, which this pipeline never calls. Insurance is therefore zero at launch.
 

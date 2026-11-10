@@ -3,7 +3,7 @@
   "approved": true,
   "approval": {
     "owner": "Red",
-    "reason": "Approved by Red (Adam) for 0G mainnet USDC.e collateral at exactly 1x maximum leverage (100% initial / 50% maintenance margin; long initial weight 0, short initial weight 2.0). Sizing unchanged from Galileo; initial/reference prices must come only from a fresh verified signed Stork deployment snapshot."
+    "reason": "Approved by Red (Adam) for 0G mainnet USDC.e collateral at exactly 1x maximum leverage (100% initial / 50% maintenance margin; long initial weight 0, short initial weight 2.000000001, since 2.0 is the BaseEngine spot-short sentinel). Sizing unchanged from Galileo; initial/reference prices must come only from a fresh verified signed Stork deployment snapshot."
   },
   "spreads": "0",
   "products": [
@@ -15,7 +15,7 @@
       "lpSpreadX18": "0",
       "risk": {
         "longWeightInitial": 0,
-        "shortWeightInitial": 2000000000,
+        "shortWeightInitial": 2000000001,
         "longWeightMaintenance": 500000000,
         "shortWeightMaintenance": 1500000000
       }
@@ -28,7 +28,7 @@
       "lpSpreadX18": "0",
       "risk": {
         "longWeightInitial": 0,
-        "shortWeightInitial": 2000000000,
+        "shortWeightInitial": 2000000001,
         "longWeightMaintenance": 500000000,
         "shortWeightMaintenance": 1500000000
       }
@@ -41,7 +41,7 @@
       "lpSpreadX18": "0",
       "risk": {
         "longWeightInitial": 0,
-        "shortWeightInitial": 2000000000,
+        "shortWeightInitial": 2000000001,
         "longWeightMaintenance": 500000000,
         "shortWeightMaintenance": 1500000000
       }
@@ -54,7 +54,7 @@
       "lpSpreadX18": "0",
       "risk": {
         "longWeightInitial": 0,
-        "shortWeightInitial": 2000000000,
+        "shortWeightInitial": 2000000001,
         "longWeightMaintenance": 500000000,
         "shortWeightMaintenance": 1500000000
       }

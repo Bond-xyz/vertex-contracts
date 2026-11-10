@@ -27,17 +27,20 @@ describe('0G mainnet 1x launch risk', () => {
       for (const product of products.products) {
         expect(product.risk).to.deep.equal(profile.riskModel.weights);
         const collateral = 1_000n;
-        // 1x long / short is exactly at the initial-health boundary (allowed).
-        expect(initialHealth(collateral, collateral, 'long', product.risk.longWeightInitial)).to.equal(0n);
-        expect(initialHealth(collateral, collateral, 'short', product.risk.shortWeightInitial)).to.equal(0n);
-        // Any exposure above 1x makes initial health negative (rejected).
-        expect(initialHealth(collateral, collateral + 1n, 'long', product.risk.longWeightInitial) < 0n).to.equal(true);
-        expect(initialHealth(collateral, collateral + 1n, 'short', product.risk.shortWeightInitial) < 0n).to.equal(
+        // A 1x long sits exactly on the initial-health boundary; a full 1x short is
+        // refused (short cap is 1/1.000000001x); anything above 1x is refused.
+        expect(initialHealth(collateral * ONE, collateral * ONE, 'long', product.risk.longWeightInitial)).to.equal(0n);
+        expect(
+          initialHealth(collateral * ONE, collateral * ONE + 1n, 'long', product.risk.longWeightInitial) < 0n
+        ).to.equal(true);
+        expect(initialHealth(collateral, collateral, 'short', product.risk.shortWeightInitial) < 0n).to.equal(true);
+        expect(initialHealth(1_000_000_001n, 1_000_000_000n, 'short', product.risk.shortWeightInitial) >= 0n).to.equal(
           true
         );
         // Weights sit exactly on the audited loadProducts bounds and PerpEngine ordering.
         expect(product.risk.longWeightInitial).to.equal(0);
-        expect(product.risk.shortWeightInitial).to.equal(2_000_000_000);
+        // 2.0 is BaseEngine's spot-short sentinel (health = int128.min).
+        expect(product.risk.shortWeightInitial).to.equal(2_000_000_001);
         expect(product.risk.longWeightInitial <= product.risk.longWeightMaintenance).to.equal(true);
         expect(product.risk.shortWeightInitial >= product.risk.shortWeightMaintenance).to.equal(true);
       }

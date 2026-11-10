@@ -41,6 +41,9 @@ export type PerpdexNetworkProfile = {
     initialMarginPercent: string;
     maintenanceMarginPercent: string;
     maximumLeverage: string;
+    // Audited loadProducts ceiling; 2.0 (2e9) itself is BaseEngine's spot-short
+    // sentinel (health = int128.min) and is always refused for perps.
+    maxShortWeightInitial: number;
     weights: {
       longWeightInitial: number;
       shortWeightInitial: number;
@@ -62,6 +65,22 @@ export type PerpdexNetworkProfile = {
       commit: string;
       tree: string;
       files: readonly { path: string; blob: string; sha256: string }[];
+    } | null;
+  };
+  // OffchainExchange matching does not enforce health, so the sequencer's own
+  // leverage cap must match riskModel.maximumLeverage. Mainnet requires reviewed
+  // evidence of the exact production runtime config for every lane before deploy.
+  sequencerLeverageEvidence: {
+    required: boolean;
+    evidence: {
+      repository: string;
+      commit: string;
+      tree: string;
+      maxLeverage: number;
+      lanes: readonly {
+        deployment: PerpdexNetworkName;
+        files: readonly { path: string; blob: string; sha256: string }[];
+      }[];
     } | null;
   };
   // Endpoint.submitTransactionsChecked signs keccak(idx, transactions) with no
@@ -132,6 +151,7 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
     initialMarginPercent: '5',
     maintenanceMarginPercent: '2.5',
     maximumLeverage: '20',
+    maxShortWeightInitial: 2_000_000_000,
     weights: {
       longWeightInitial: 950_000_000,
       shortWeightInitial: 1_050_000_000,
@@ -146,6 +166,7 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
     previousReplayOnly: [],
     provenance: null,
   },
+  sequencerLeverageEvidence: { required: false, evidence: null },
   distinctVerifierQuorumFrom: [],
   ids: {
     releasePolicy: 'bond-perpdex-galileo-testnet-release',
@@ -231,16 +252,18 @@ const OG_MAINNET_SHARED = {
   explorer: 'https://chainscan.0g.ai',
   approvalMode: 'external_reviewer_signature' as const,
   activeReleaseStatus: 'approved_for_og_mainnet_release',
-  // Red (Adam): mainnet launches at exactly 1x. 100% initial margin means
-  // longWeightInitial 0 and shortWeightInitial 2.0; maintenance keeps Galileo's
-  // half-of-initial ratio (50%).
+  // Red (Adam): mainnet launches at 1x. longWeightInitial 0 caps longs at exactly
+  // 1x; shortWeightInitial is 2.000000001 because 2.0 is BaseEngine's spot-short
+  // sentinel, capping shorts at 1/1.000000001x. Maintenance keeps Galileo's
+  // half-of-initial ratio (50%), reviewed safe with zero insurance.
   riskModel: {
     initialMarginPercent: '100',
     maintenanceMarginPercent: '50',
     maximumLeverage: '1',
+    maxShortWeightInitial: 2_000_000_001,
     weights: {
       longWeightInitial: 0,
-      shortWeightInitial: 2_000_000_000,
+      shortWeightInitial: 2_000_000_001,
       longWeightMaintenance: 500_000_000,
       shortWeightMaintenance: 1_500_000_000,
     },
@@ -400,6 +423,8 @@ function ogMainnetProfile(input: {
     operators: OG_MAINNET_SHARED.operators,
     releaseReviewer: OG_MAINNET_SHARED.releaseReviewer,
     storkAggregator: OG_MAINNET_SHARED.storkAggregator,
+    // Operator-fill: reviewed production trading runtime config keeping max_leverage = 1.
+    sequencerLeverageEvidence: { required: true, evidence: null },
     distinctVerifierQuorumFrom: [input.sibling],
     ids: {
       releasePolicy: `bond-perpdex-${input.name}-release`,
@@ -674,7 +699,8 @@ export function loadProducts(
       risk.longWeightInitial > risk.longWeightMaintenance ||
       risk.shortWeightInitial < risk.shortWeightMaintenance ||
       risk.longWeightInitial < 0 ||
-      risk.shortWeightInitial > 2_000_000_000
+      risk.shortWeightInitial === 2_000_000_000 ||
+      risk.shortWeightInitial > profile.riskModel.maxShortWeightInitial
     ) {
       throw new Error(`${product.symbol} risk weights violate audited bounds`);
     }

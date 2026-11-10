@@ -9,7 +9,7 @@
     "compile": "hardhat compile",
     "force-compile": "TS_NODE_TRANSPILE_ONLY=1 hardhat clean && TS_NODE_TRANSPILE_ONLY=1 hardhat compile",
     "test": "TS_NODE_TRANSPILE_ONLY=1 hardhat test --network hardhat",
-    "test:release": "TS_NODE_TRANSPILE_ONLY=1 hardhat test test/release-gates.test.ts test/release-attestation.test.ts test/red-testnet-approval.test.ts test/stork-deployment-packet.test.ts test/galileo-finalization-journal.test.ts test/withdrawal-release-mode.test.ts test/galileo-address-plan.test.ts test/galileo-backend-runtime-binding.test.ts test/galileo-fee-policy.test.ts test/network-profile.test.ts test/og-mainnet-gates.test.ts test/og-mainnet-1x-risk.test.ts --network hardhat",
+    "test:release": "TS_NODE_TRANSPILE_ONLY=1 hardhat test test/release-gates.test.ts test/release-attestation.test.ts test/red-testnet-approval.test.ts test/stork-deployment-packet.test.ts test/galileo-finalization-journal.test.ts test/withdrawal-release-mode.test.ts test/galileo-address-plan.test.ts test/galileo-backend-runtime-binding.test.ts test/galileo-fee-policy.test.ts test/network-profile.test.ts test/og-mainnet-gates.test.ts test/og-mainnet-1x-risk.test.ts test/og-mainnet-1x-contract.test.ts --network hardhat",
     "review:og-mainnet:products": "PERPDEX_NETWORK=og-mainnet TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/validate-galileo-product-review.ts && PERPDEX_NETWORK=og-mainnet-usdz TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/validate-galileo-product-review.ts",
     "evidence:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/collect-galileo-review-inputs.ts --network hardhat",
     "diff:galileo": "TS_NODE_TRANSPILE_ONLY=1 hardhat run --no-compile scripts/contract-interface-diff.ts --network hardhat",

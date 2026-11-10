@@ -17,6 +17,7 @@ import {
   resolveNetworkProfile,
   resolveSequencer,
 } from '../scripts/deployment-config';
+import { assertSequencerLeverageEvidence } from '../scripts/stork-deployment-snapshot';
 
 const root = path.resolve(__dirname, '..');
 const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
@@ -197,6 +198,24 @@ describe('PerpDex network profiles', () => {
       expect(policy.verifier.aggregatorPublicKey).to.equal(profile.storkAggregator.current);
       expect(policy.verifier.aggregatorKeyProvenance).to.deep.equal(profile.storkAggregator.provenance);
     }
+  });
+
+  it('refuses the 2e9 sentinel short weight and gates mainnet on sequencer 1x runtime evidence', () => {
+    const products = readJson(mainnet.files.products);
+    products.products[0].risk.shortWeightInitial = 2_000_000_000;
+    const file = path.join(os.tmpdir(), `og-mainnet-sentinel-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify(products));
+    expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
+    products.products[0].risk.shortWeightInitial = 2_000_000_002;
+    fs.writeFileSync(file, JSON.stringify(products));
+    expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
+    fs.unlinkSync(file);
+    for (const profile of [mainnet, usdz]) {
+      expect(() => assertSequencerLeverageEvidence(profile)).to.throw(
+        'sequencer 1x runtime config evidence is unresolved'
+      );
+    }
+    expect(() => assertSequencerLeverageEvidence(PERPDEX_NETWORK_PROFILES.galileo)).not.to.throw();
   });
 
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {

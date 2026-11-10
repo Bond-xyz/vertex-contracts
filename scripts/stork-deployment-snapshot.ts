@@ -580,7 +580,36 @@ export type GalileoStaticReleasePolicy = ReturnType<typeof loadTrackedStorkDeplo
   collateralProvenanceSha256: string;
 };
 
+export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile): void {
+  const gate = profile.sequencerLeverageEvidence;
+  if (!gate.required) return;
+  const evidence = gate.evidence;
+  if (evidence === null) {
+    throw new Error(
+      `${profile.name} backend sequencer ${profile.riskModel.maximumLeverage}x runtime config evidence is unresolved`
+    );
+  }
+  requireGitObject(evidence.commit, 'sequencer runtime config commit');
+  requireGitObject(evidence.tree, 'sequencer runtime config tree');
+  const lanes = evidence.lanes.map((lane) => lane.deployment).sort();
+  const expectedLanes = [profile.name, ...profile.distinctVerifierQuorumFrom].sort();
+  if (
+    evidence.maxLeverage !== Number(profile.riskModel.maximumLeverage) ||
+    JSON.stringify(lanes) !== JSON.stringify(expectedLanes) ||
+    evidence.lanes.some((lane) => lane.files.length === 0)
+  ) {
+    throw new Error(`${profile.name} sequencer runtime config evidence does not preserve the reviewed leverage cap`);
+  }
+  for (const lane of evidence.lanes) {
+    for (const file of lane.files) {
+      requireGitObject(file.blob, `${lane.deployment} ${file.path} blob`);
+      requireSha256(file.sha256, `${lane.deployment} ${file.path} SHA-256`);
+    }
+  }
+}
+
 export function collectGalileoStaticReleasePolicy(input: { repoRoot?: string } = {}): GalileoStaticReleasePolicy {
+  assertSequencerLeverageEvidence(PERPDEX_NETWORK);
   const repoRoot = input.repoRoot || path.resolve(__dirname, '..');
   const tracked = loadTrackedStorkDeploymentPolicy(repoRoot);
   if (tracked.policy.coherence.maxSignedTimestampSpreadSeconds === null) {
