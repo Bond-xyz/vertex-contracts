@@ -3,14 +3,14 @@ import fs from 'fs';
 import path from 'path';
 import { utils } from 'ethers';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_RELEASE_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  deploymentStateFile,
+  PERPDEX_NETWORK,
+  PerpdexNetworkProfile,
+  requirePinnedDeployer,
+  resolveSequencer,
 } from './deployment-config';
 
-export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = 'ca93ac655c20b0dce20cea9f83b4c55bd8f106b8faedb3457365539be46d1735';
+export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = 'be6287d6d01a67c9a29ee5f61244608186447066acd1ceacfcd8504e6ad34284';
 export const GALILEO_PREPARE_TRANSACTION_COUNT = 24;
 export const GALILEO_FINALIZE_TRANSACTION_COUNT = 5;
 
@@ -52,9 +52,37 @@ export function assertGalileoDeploymentScriptMatchesPlan(
   }
 }
 
-export function createGalileoAddressPlan(deployerInput: string, sequencerInput: string, nonceInput: number) {
-  const deployer = nonzeroAddress(deployerInput, 'deployer');
-  const sequencer = nonzeroAddress(sequencerInput, 'sequencer');
+// The audited prepare/finalize graph leaves the deployer as Endpoint owner and
+// ProxyAdmin owner. Mainnet profiles record the custody admin that must take
+// ownership afterwards; this pipeline never sends that handoff transaction.
+function ownershipHandoff(profile: PerpdexNetworkProfile, deployer: string) {
+  if (profile.operators.contractAdmin === null) return null;
+  return {
+    targetOwner: utils.getAddress(profile.operators.contractAdmin),
+    currentOwnerAfterFinalization: deployer,
+    executedByThisPipeline: false,
+    status: 'pending_operator_sign_off',
+    contractsToVerify: [
+      'endpoint',
+      'clearinghouse',
+      'spotEngine',
+      'perpEngine',
+      'offchainExchange',
+      'verifier',
+      'proxyAdmin',
+    ],
+    note: 'confirm the exact Ownable set from on-chain owner() reads after finalization',
+  };
+}
+
+export function createGalileoAddressPlan(
+  deployerInput: string,
+  sequencerInput: string,
+  nonceInput: number,
+  profile: PerpdexNetworkProfile = PERPDEX_NETWORK
+) {
+  const deployer = nonzeroAddress(requirePinnedDeployer(deployerInput, profile), 'deployer');
+  const sequencer = nonzeroAddress(resolveSequencer(sequencerInput, deployer, profile), 'sequencer');
   const firstTransactionNonce = safeNonce(nonceInput);
   const createAddress = (offset: number): string =>
     utils.getContractAddress({ from: deployer, nonce: firstTransactionNonce + offset });
@@ -163,8 +191,8 @@ export function createGalileoAddressPlan(deployerInput: string, sequencerInput: 
 
   return {
     schemaVersion: 1,
-    release: GALILEO_RELEASE_ID,
-    network: { name: '0G Galileo Testnet', chainId: GALILEO_CHAIN_ID },
+    release: profile.releaseId,
+    network: { name: profile.displayName, chainId: profile.chainId },
     deploymentScriptSha256: GALILEO_DEPLOYMENT_SCRIPT_SHA256,
     deployer,
     sequencer,
@@ -175,11 +203,14 @@ export function createGalileoAddressPlan(deployerInput: string, sequencerInput: 
       verifierSignerCount: 3,
       verifierSignerBitmask: 7,
     },
+    ...(profile.name === 'galileo'
+      ? {}
+      : { profile: profile.name, ownershipHandoff: ownershipHandoff(profile, deployer) }),
     parameters: {
       collateral: {
-        address: GALILEO_USDCE_ADDRESS,
-        symbol: GALILEO_USDCE_SYMBOL,
-        decimals: GALILEO_USDCE_DECIMALS,
+        address: profile.collateral.address,
+        symbol: profile.collateral.symbol,
+        decimals: profile.collateral.decimals,
         productId: 0,
         deployToken: false,
       },
@@ -223,10 +254,10 @@ export function writeGalileoAddressPlan(): void {
     required(process.env.PERPDEX_SEQUENCER_ADDRESS, 'PERPDEX_SEQUENCER_ADDRESS'),
     nonce
   );
-  const output = path.resolve(process.env.PERPDEX_ADDRESS_PLAN_FILE || './deployments/16602/address-plan.local.json');
+  const output = path.resolve(process.env.PERPDEX_ADDRESS_PLAN_FILE || deploymentStateFile('address-plan'));
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, `${JSON.stringify(plan, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-  console.log(`created unsigned Galileo address plan at ${output}`);
+  console.log(`created unsigned ${PERPDEX_NETWORK.name} address plan at ${output}`);
   console.log(`expected first contract: ${plan.expectedFirstContract}`);
   console.log('No private key or secret value was read.');
 }

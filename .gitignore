@@ -2,7 +2,10 @@ secrets.json
 .secrets
 .env
 .env.galileo.local
+.env.og-mainnet.local
+.env.og-mainnet-usdz.local
 verifier-private-keys.galileo.local.json
+verifier-private-keys.og-mainnet*.json
 config/*.local.json
 
 node_modules/
@@ -22,6 +25,7 @@ artifacts/
 
 # Network deployment output is reviewed and promoted separately.
 deployments/16602/*.local.json
+deployments/16661/**/*.local.json
 
 # ABIs
 abis/

@@ -3,12 +3,10 @@ import path from 'path';
 import { BigNumber, Wallet } from 'ethers';
 import type { providers } from 'ethers';
 
-export const TRACKED_GALILEO_FEE_POLICY = 'config/galileo.fee-policy.json';
-export const GALILEO_GAS_PRICE_ENV = 'PERPDEX_GALILEO_GAS_PRICE_WEI';
-const GALILEO_CHAIN_ID = 16602;
-const EXPECTED_MINIMUM_GAS_PRICE_WEI = 2_000_000_007n;
-const EXPECTED_DEFAULT_GAS_PRICE_WEI = 4_000_000_007n;
-const EXPECTED_MAXIMUM_GAS_PRICE_WEI = 20_000_000_000n;
+import { PERPDEX_NETWORK } from './deployment-config';
+
+export const TRACKED_GALILEO_FEE_POLICY = PERPDEX_NETWORK.files.feePolicy;
+export const GALILEO_GAS_PRICE_ENV = PERPDEX_NETWORK.gasPriceEnv;
 
 export type GalileoFeePolicy = {
   schemaVersion: number;
@@ -18,9 +16,9 @@ export type GalileoFeePolicy = {
   transactionType: string;
   requiredEnvironmentVariable: string;
   requireExplicitValue: boolean;
-  minimumGasPriceWei: string;
-  defaultGasPriceWei: string;
-  maximumGasPriceWei: string;
+  minimumGasPriceWei: string | null;
+  defaultGasPriceWei: string | null;
+  maximumGasPriceWei: string | null;
 };
 
 export type VerifiedGalileoFeePolicy = GalileoFeePolicy & {
@@ -52,22 +50,26 @@ function hexWei(value: unknown, field: string): bigint {
 export function validateGalileoFeePolicy(policy: GalileoFeePolicy): VerifiedGalileoFeePolicy {
   if (
     policy.schemaVersion !== 1 ||
-    policy.policyId !== 'bond-perpdex-galileo-legacy-fees' ||
-    policy.status !== 'approved_for_galileo_testnet_release' ||
-    policy.chainId !== GALILEO_CHAIN_ID ||
+    policy.policyId !== PERPDEX_NETWORK.ids.feePolicy ||
+    policy.status !== PERPDEX_NETWORK.activeReleaseStatus ||
+    policy.chainId !== PERPDEX_NETWORK.chainId ||
     policy.transactionType !== 'legacy' ||
     policy.requiredEnvironmentVariable !== GALILEO_GAS_PRICE_ENV ||
     policy.requireExplicitValue !== true
   ) {
-    throw new Error('tracked Galileo fee policy identity or release scope mismatch');
+    throw new Error(`tracked ${PERPDEX_NETWORK.name} fee policy identity or release scope mismatch`);
+  }
+  const reviewedBounds = PERPDEX_NETWORK.pins.feeBoundsWei;
+  if (reviewedBounds === null) {
+    throw new Error(`${PERPDEX_NETWORK.name} gas-price bounds are operator-fill; no reviewed fee policy exists`);
   }
   const minimumGasPrice = decimalWei(policy.minimumGasPriceWei, 'minimum Galileo gas price');
   const defaultGasPrice = decimalWei(policy.defaultGasPriceWei, 'default Galileo gas price');
   const maximumGasPrice = decimalWei(policy.maximumGasPriceWei, 'maximum Galileo gas price');
   if (
-    minimumGasPrice !== EXPECTED_MINIMUM_GAS_PRICE_WEI ||
-    defaultGasPrice !== EXPECTED_DEFAULT_GAS_PRICE_WEI ||
-    maximumGasPrice !== EXPECTED_MAXIMUM_GAS_PRICE_WEI
+    minimumGasPrice !== reviewedBounds.minimum ||
+    defaultGasPrice !== reviewedBounds.default ||
+    maximumGasPrice !== reviewedBounds.maximum
   ) {
     throw new Error('tracked Galileo fee bounds differ from the reviewed release policy');
   }

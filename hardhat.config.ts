@@ -15,28 +15,42 @@ import 'hardhat-contract-sizer';
 import 'hardhat-abi-exporter';
 import { HardhatUserConfig } from 'hardhat/config';
 import { galileoHardhatFeeConfig } from './scripts/galileo-fee-policy';
+import { PERPDEX_NETWORK, resolveNetworkProfile } from './scripts/deployment-config';
 
 dotenv.config({
-  path: process.env.PERPDEX_ENV_FILE || '.env.galileo.local',
+  path: process.env.PERPDEX_ENV_FILE || PERPDEX_NETWORK.files.envFile,
 });
 
-const galileoRpcUrl = process.env.PERPDEX_GALILEO_RPC_URL || process.env.GALILEO_RPC_URL;
-const galileoDeployerKey = process.env.PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY;
-const galileoChainId = Number(process.env.GALILEO_CHAIN_ID || '16602');
+// PERPDEX_NETWORK is resolved from the shell before the env file loads; an env
+// file must never switch the selected chain profile.
+if (resolveNetworkProfile().name !== PERPDEX_NETWORK.name) {
+  throw new Error('PERPDEX_NETWORK must be set in the shell environment, not in the env file');
+}
 
-if (galileoChainId !== 16602) {
-  throw new Error(`refusing Galileo configuration for chain ${galileoChainId}`);
+const rpcUrl =
+  process.env[PERPDEX_NETWORK.rpcUrlEnv] ||
+  (PERPDEX_NETWORK.legacyRpcUrlEnv ? process.env[PERPDEX_NETWORK.legacyRpcUrlEnv] : undefined);
+const chainId = Number(process.env[PERPDEX_NETWORK.chainIdEnv] || String(PERPDEX_NETWORK.chainId));
+
+if (chainId !== PERPDEX_NETWORK.chainId) {
+  throw new Error(`refusing ${PERPDEX_NETWORK.name} configuration for chain ${chainId}`);
 }
 
 const networks: HardhatUserConfig['networks'] = {};
-if (galileoRpcUrl && galileoDeployerKey) {
-  networks.galileo = {
-    url: galileoRpcUrl,
-    chainId: galileoChainId,
-    accounts: [galileoDeployerKey],
+const deployerKey = PERPDEX_NETWORK.deployerPrivateKeyEnv
+  ? process.env[PERPDEX_NETWORK.deployerPrivateKeyEnv]
+  : undefined;
+if (rpcUrl && deployerKey) {
+  networks[PERPDEX_NETWORK.hardhatNetwork] = {
+    url: rpcUrl,
+    chainId,
+    accounts: [deployerKey],
     ...galileoHardhatFeeConfig(),
     timeout: 120000,
   };
+} else if (rpcUrl && PERPDEX_NETWORK.deployerPrivateKeyEnv === null) {
+  // Custody-held deployer: read-only network with no local signer.
+  networks[PERPDEX_NETWORK.hardhatNetwork] = { url: rpcUrl, chainId, accounts: [], timeout: 120000 };
 }
 
 const config: HardhatUserConfig = {

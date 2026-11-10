@@ -3,8 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { artifacts } from 'hardhat';
 import { utils } from 'ethers';
+import { PERPDEX_NETWORK } from './deployment-config';
 
-const BASELINE_FILE = path.resolve(__dirname, '..', 'config', 'galileo.contract-baseline.json');
+const BASELINE_FILE = path.resolve(__dirname, '..', PERPDEX_NETWORK.files.contractBaseline);
 export const ENDPOINT_RUNTIME_BUDGET_BYTES = 24_560;
 
 type ContractBaseline = {

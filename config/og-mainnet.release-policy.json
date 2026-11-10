@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-og-mainnet-release",
+  "policyVersion": 1,
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-og-mainnet-audited-base",
+  "attestationDomain": {
+    "name": "Bond PerpDex 0G Mainnet USDC.e Release",
+    "version": "1"
+  },
+  "chainId": 16661,
+  "collateral": {
+    "address": "0x1f3aa82227281ca364bfb3d253b0f1af1da6473e",
+    "productId": 0,
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "approvalMode": "external_reviewer_signature",
+  "requiredReviewerSignatures": 1,
+  "reviewers": [
+    {
+      "name": "Adam (deployer wallet)",
+      "address": "0x07b735E020549ba56AAb8e3370d102C2Df6cabF7"
+    }
+  ],
+  "redApprovalArtifact": null,
+  "mainnetExternalReviewRequired": true,
+  "status": "pending_og_mainnet_review"
+}

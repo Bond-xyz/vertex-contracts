@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-og-mainnet-usdz-release",
+  "policyVersion": 1,
+  "projectId": "g-bond",
+  "releaseId": "bond-perpdex-og-mainnet-usdz-audited-base",
+  "attestationDomain": {
+    "name": "Bond PerpDex 0G Mainnet USDZ Release",
+    "version": "1"
+  },
+  "chainId": 16661,
+  "collateral": {
+    "address": "0xd4d54bd7379e799417563b1bb42426c9bd4ccb2a",
+    "productId": 0,
+    "symbol": "USDZ",
+    "decimals": 6
+  },
+  "approvalMode": "external_reviewer_signature",
+  "requiredReviewerSignatures": 1,
+  "reviewers": [
+    {
+      "name": "Adam (deployer wallet)",
+      "address": "0x07b735E020549ba56AAb8e3370d102C2Df6cabF7"
+    }
+  ],
+  "redApprovalArtifact": null,
+  "mainnetExternalReviewRequired": true,
+  "status": "pending_og_mainnet_review"
+}

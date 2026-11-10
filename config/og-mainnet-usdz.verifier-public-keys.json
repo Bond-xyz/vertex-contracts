@@ -1,0 +1,18 @@
+{
+  "chainId": 16661,
+  "signerBitmask": 7,
+  "keys": [
+    {
+      "x": "0x15e36ee2899ef38cb41540e93d545d95b5e487f39d9bf92b63c2e5aec5c6e47a",
+      "y": "0x5bb900b1689fbb5ce97f848ae2d4e934dfa73efdc6deed21d5a3a2aecef59836"
+    },
+    {
+      "x": "0x903dc7600ae3ec2ac32e67157b469ae25a75c6f1b13a45860d0182ed3f071566",
+      "y": "0x3864a39492f74212dbdc926d0ec45165298ff0dbed6c581ce7331541a43d3928"
+    },
+    {
+      "x": "0xeed0dd794a3d54507fd49ca326d9bc7a5769d5b31d127e589e79e6d18d4c0ef1",
+      "y": "0x3a5187ab28490de3dc9dd730fceabf30cd1b00ed4a73125755c27869615a6aae"
+    }
+  ]
+}

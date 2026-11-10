@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-og-mainnet-legacy-fees",
+  "status": "approved_for_og_mainnet_release",
+  "chainId": 16661,
+  "transactionType": "legacy",
+  "requiredEnvironmentVariable": "PERPDEX_OG_MAINNET_GAS_PRICE_WEI",
+  "requireExplicitValue": true,
+  "minimumGasPriceWei": "2000000007",
+  "defaultGasPriceWei": "4000000007",
+  "maximumGasPriceWei": "20000000000",
+  "observation": {
+    "method": "eth_gasPrice",
+    "rpc": "https://evmrpc.0g.ai",
+    "blockNumber": 49846964,
+    "gasPriceWei": "4000000007",
+    "note": "Operator observation via cast gas-price; the exact deploy-time value is still confirmed by PERPDEX_OG_MAINNET_GAS_PRICE_WEI and the live RPC fee check."
+  }
+}

@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { GalileoReleasePolicy, validateReleasePolicy } from './release-attestation';
 import { validateStorkDeploymentPolicy, StorkDeploymentPolicy } from './stork-deployment-snapshot';
+import { PERPDEX_NETWORK } from './deployment-config';
 
 export const GALILEO_BACKEND_RUNTIME_SOURCE_COMMIT = '4d479bd167d4cc98dce373af214a5d109b9cad33';
 export const GALILEO_BACKEND_RUNTIME_SOURCE_TREE = '5d33e2f52f74cf2c2c51a91b53dcc2a21d7068f0';
@@ -212,6 +213,11 @@ export function bindGalileoBackendRuntime(input: BindInput): {
   productReviewFile: string;
   releasePolicyFile: string;
 } {
+  if (PERPDEX_NETWORK.name !== 'galileo') {
+    throw new Error(
+      `backend runtime binding is reviewed for Galileo only; ${PERPDEX_NETWORK.name} has no reviewed backend pins`
+    );
+  }
   const repoRoot = path.resolve(input.repoRoot);
   const artifactPolicyFile = path.resolve(input.artifactPolicyFile);
   const sourceCommit = requireGitCommit(input.sourceCommit, 'backend runtime source commit');
