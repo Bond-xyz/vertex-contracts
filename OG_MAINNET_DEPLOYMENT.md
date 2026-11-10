@@ -16,7 +16,13 @@ The chain, collateral, release-id, tracked-file and state-path gates all read th
 
 ## Dual collateral = two deployments
 
-Vertex `Endpoint` has exactly one quote token (product 0). USDC.e and USDZ collateral are therefore two independent graphs on chain 16661, each with its own Endpoint, Clearinghouse, engines, Verifier, ProxyAdmin and virtual books. Shared between them: the audited contract baseline (`config/og-mainnet.contract-baseline.json`, byte-identical to Galileo's), the fee policy (`config/og-mainnet.fee-policy.json`) and the verifier quorum (`config/og-mainnet.verifier-public-keys.json`). Each deployment has its own products, product-approval review, collateral provenance, release policy and Stork policy.
+Vertex `Endpoint` has exactly one quote token (product 0). USDC.e and USDZ collateral are therefore two independent graphs on chain 16661, each with its own Endpoint, Clearinghouse, engines, Verifier, ProxyAdmin and virtual books. Shared between them: the audited contract baseline (`config/og-mainnet.contract-baseline.json`, byte-identical to Galileo's) and the fee policy (`config/og-mainnet.fee-policy.json`). Each deployment has its own products, product-approval review, collateral provenance, release policy, Stork policy and **verifier quorum**.
+
+### Why the verifier quorums must differ
+
+`Endpoint.submitTransactionsChecked` verifies the quorum signature over `digest = keccak256(abi.encode(idx))`, then folds in each transaction: `digest = keccak256(abi.encodePacked(digest, tx_i))`. The digest has no `chainId` and no `address(this)`. If both Endpoints trusted the same three keys, a batch signed for one deployment would also verify on the other whenever their `nSubmissions` matched. Separate quorums remove that cross-Endpoint replay.
+
+`loadVerifierConfig` enforces this invariant via `assertDistinctVerifierQuorum`, using each profile's `distinctVerifierQuorumFrom` list. It refuses a mainnet verifier config if it shares any key with the sibling deployment's config, or if the sibling config is missing. `test/network-profile.test.ts` covers the tracked configs and the shared-key regressions.
 
 ## Operators
 
@@ -25,7 +31,8 @@ Vertex `Endpoint` has exactly one quote token (product 0). USDC.e and USDZ colla
 | Sequencer | `0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59` (Fordefi production vault) | Profile pin. `resolveSequencer` refuses any other `PERPDEX_SEQUENCER_ADDRESS`. |
 | Contract admin / owner | `0x7a3A932F1cc402941f3238292c80d138dA49Be25` (Fordefi Vault 1.3) | Profile pin, recorded as `ownershipHandoff` in the address plan. |
 | Deployer | Fordefi deployer wallet, **not yet created** | Supplied at deploy time as `PERPDEX_DEPLOYER_ADDRESS`, the same way Galileo does it. |
-| Verifier quorum | 3 secp256k1 keys, bitmask 7 | Public points in `config/og-mainnet.verifier-public-keys.json`. The private halves are only in GCP Secret Manager `g-bond`: `perpdex-mainnet-verifier-key-0/1/2`. |
+| Verifier quorum (USDC.e) | 3 secp256k1 keys, bitmask 7 | Public points in `config/og-mainnet.verifier-public-keys.json`. The private halves are only in GCP Secret Manager `g-bond`: `perpdex-mainnet-verifier-key-0/1/2`. |
+| Verifier quorum (USDZ) | 3 distinct secp256k1 keys, bitmask 7 | Public points in `config/og-mainnet-usdz.verifier-public-keys.json`. The private halves are only in GCP Secret Manager `g-bond`: `perpdex-mainnet-usdz-verifier-key-0/1/2`. |
 
 Fordefi vault UUID / chain id (`evm_16661`) are custody-side inputs and are not used by this repository.
 

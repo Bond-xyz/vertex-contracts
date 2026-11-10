@@ -1,8 +1,10 @@
 import { expect } from 'chai';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { utils } from 'ethers';
 import {
+  assertDistinctVerifierQuorum,
   loadProducts,
   loadVerifierConfig,
   OG_MAINNET_CHAIN_ID,
@@ -86,14 +88,35 @@ describe('PerpDex network profiles', () => {
     );
   });
 
-  it('loads the shared mainnet verifier quorum as three distinct points for bitmask 7', () => {
-    const config = loadVerifierConfig(path.join(root, mainnet.files.verifierPublicKeys), mainnet);
-    expect(config.signerBitmask).to.equal(7);
-    expect(config.keys).to.have.length(3);
-    expect(usdz.files.verifierPublicKeys).to.equal(mainnet.files.verifierPublicKeys);
+  it('binds a distinct verifier quorum per mainnet deployment (cross-Endpoint replay safety)', () => {
+    expect(mainnet.files.verifierPublicKeys).to.equal('config/og-mainnet.verifier-public-keys.json');
+    expect(usdz.files.verifierPublicKeys).to.equal('config/og-mainnet-usdz.verifier-public-keys.json');
+    expect(mainnet.distinctVerifierQuorumFrom).to.deep.equal(['og-mainnet-usdz']);
+    expect(usdz.distinctVerifierQuorumFrom).to.deep.equal(['og-mainnet']);
+    const usdcQuorum = loadVerifierConfig(path.join(root, mainnet.files.verifierPublicKeys), mainnet);
+    const usdzQuorum = loadVerifierConfig(path.join(root, usdz.files.verifierPublicKeys), usdz);
+    for (const config of [usdcQuorum, usdzQuorum]) {
+      expect(config.signerBitmask).to.equal(7);
+      expect(config.keys).to.have.length(3);
+    }
+    const usdcX = new Set(usdcQuorum.keys.map((key) => key.x.toLowerCase()));
+    expect(usdzQuorum.keys.filter((key) => usdcX.has(key.x.toLowerCase()))).to.have.length(0);
     expect(() =>
       loadVerifierConfig(path.join(root, mainnet.files.verifierPublicKeys), PERPDEX_NETWORK_PROFILES.galileo)
     ).to.throw('must target chain 16602');
+  });
+
+  it('refuses a mainnet verifier config that reuses any key from the sibling deployment', () => {
+    const usdcQuorum = readJson(mainnet.files.verifierPublicKeys);
+    const usdzQuorum = readJson(usdz.files.verifierPublicKeys);
+    expect(() => loadVerifierConfig(path.join(root, mainnet.files.verifierPublicKeys), usdz)).to.throw(
+      'shares 3 key(s) with og-mainnet'
+    );
+    const oneShared = { ...usdzQuorum, keys: [usdcQuorum.keys[0], ...usdzQuorum.keys.slice(1)] };
+    expect(() => assertDistinctVerifierQuorum(oneShared, usdz)).to.throw('shares 1 key(s) with og-mainnet');
+    expect(() => assertDistinctVerifierQuorum(oneShared, mainnet)).to.throw('shares 2 key(s) with og-mainnet-usdz');
+    const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-quorum-'));
+    expect(() => assertDistinctVerifierQuorum(usdzQuorum, usdz, emptyRoot)).to.throw('og-mainnet config is missing');
   });
 
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {

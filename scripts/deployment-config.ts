@@ -35,6 +35,11 @@ export type PerpdexNetworkProfile = {
   approvalMode: ReleaseApprovalMode;
   activeReleaseStatus: string;
   operators: { sequencer: string | null; contractAdmin: string | null };
+  // Endpoint.submitTransactionsChecked signs keccak(idx, transactions) with no
+  // chainId or Endpoint address, so a batch signed for one deployment replays on
+  // any other Endpoint whose nSubmissions matches. Deployments listed here must
+  // never share a verifier key with this profile.
+  distinctVerifierQuorumFrom: readonly PerpdexNetworkName[];
   ids: {
     releasePolicy: string;
     feePolicy: string;
@@ -91,6 +96,7 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
   approvalMode: 'tracked_red_testnet_approval',
   activeReleaseStatus: 'approved_for_galileo_testnet_release',
   operators: { sequencer: null, contractAdmin: null },
+  distinctVerifierQuorumFrom: [],
   ids: {
     releasePolicy: 'bond-perpdex-galileo-testnet-release',
     feePolicy: 'bond-perpdex-galileo-legacy-fees',
@@ -158,8 +164,9 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
 };
 
 // Both 0G mainnet deployments share chain 16661, the audited contract baseline,
-// the fee policy, and the verifier quorum. Everything that names the quote token
-// or its markets is per deployment, because Endpoint has exactly one quote token.
+// and the fee policy. Everything that names the quote token or its markets is per
+// deployment (Endpoint has exactly one quote token), and so is the verifier quorum.
+// See distinctVerifierQuorumFrom for why.
 const OG_MAINNET_SHARED = {
   chainId: OG_MAINNET_CHAIN_ID,
   projectId: 'g-bond',
@@ -188,7 +195,6 @@ const OG_MAINNET_SHARED = {
   sharedFiles: {
     contractBaseline: 'config/og-mainnet.contract-baseline.json',
     feePolicy: 'config/og-mainnet.fee-policy.json',
-    verifierPublicKeys: 'config/og-mainnet.verifier-public-keys.json',
   },
 };
 
@@ -207,6 +213,7 @@ const OG_MAINNET_REGISTRY_SOURCE = {
 
 function ogMainnetProfile(input: {
   name: 'og-mainnet' | 'og-mainnet-usdz';
+  sibling: 'og-mainnet' | 'og-mainnet-usdz';
   collateral: PerpdexNetworkProfile['collateral'];
   marketQuote: 'USDC' | 'USDZ';
   lendingEnabled: boolean;
@@ -238,6 +245,7 @@ function ogMainnetProfile(input: {
     approvalMode: OG_MAINNET_SHARED.approvalMode,
     activeReleaseStatus: OG_MAINNET_SHARED.activeReleaseStatus,
     operators: OG_MAINNET_SHARED.operators,
+    distinctVerifierQuorumFrom: [input.sibling],
     ids: {
       releasePolicy: `bond-perpdex-${input.name}-release`,
       feePolicy: 'bond-perpdex-og-mainnet-legacy-fees',
@@ -271,7 +279,7 @@ function ogMainnetProfile(input: {
       storkPolicy: `${prefix}.stork-deployment-policy.json`,
       storkSnapshot: `${prefix}.stork-deployment-snapshot.local.json`,
       redApproval: null,
-      verifierPublicKeys: sharedFiles.verifierPublicKeys,
+      verifierPublicKeys: `${prefix}.verifier-public-keys.json`,
       verifierPrivateKeys: null,
       deploymentIntent: `${prefix}.deployment-intent.local.json`,
     },
@@ -292,6 +300,7 @@ export const PERPDEX_NETWORK_PROFILES: Readonly<Record<PerpdexNetworkName, Perpd
   galileo: GALILEO_PROFILE,
   'og-mainnet': ogMainnetProfile({
     name: 'og-mainnet',
+    sibling: 'og-mainnet-usdz',
     collateral: {
       assetId: 'USDCE',
       address: '0x1f3aa82227281ca364bfb3d253b0f1af1da6473e',
@@ -312,6 +321,7 @@ export const PERPDEX_NETWORK_PROFILES: Readonly<Record<PerpdexNetworkName, Perpd
   }),
   'og-mainnet-usdz': ogMainnetProfile({
     name: 'og-mainnet-usdz',
+    sibling: 'og-mainnet',
     collateral: {
       assetId: 'USDZ',
       address: '0xd4d54bd7379e799417563b1bb42426c9bd4ccb2a',
@@ -514,15 +524,8 @@ export function resolveProductsWithStorkPrices(
   };
 }
 
-export function loadVerifierConfig(file: string, profile: PerpdexNetworkProfile = PERPDEX_NETWORK): VerifierConfig {
-  const config = readJson<VerifierConfig>(file);
-  if (config.chainId !== profile.chainId || config.signerBitmask !== 7) {
-    throw new Error(`verifier public-key file must target chain ${profile.chainId} and bitmask 7`);
-  }
-  if (config.keys.length !== 3) {
-    throw new Error('audited Endpoint hardcodes bitmask 7; exactly three verifier keys are required');
-  }
-  const normalizedKeys = config.keys.map((point, index) => {
+function normalizedVerifierKeys(config: VerifierConfig): string[] {
+  return config.keys.map((point, index) => {
     const publicKey = utils.hexConcat(['0x04', utils.hexZeroPad(point.x, 32), utils.hexZeroPad(point.y, 32)]);
     try {
       return utils.computePublicKey(publicKey, false).toLowerCase();
@@ -530,9 +533,45 @@ export function loadVerifierConfig(file: string, profile: PerpdexNetworkProfile 
       throw new Error(`verifier public key ${index} is not a secp256k1 point`);
     }
   });
+}
+
+export function assertDistinctVerifierQuorum(
+  config: VerifierConfig,
+  profile: PerpdexNetworkProfile = PERPDEX_NETWORK,
+  repoRoot = path.resolve(__dirname, '..')
+): void {
+  const own = new Set(normalizedVerifierKeys(config));
+  for (const sibling of profile.distinctVerifierQuorumFrom) {
+    const siblingFile = path.resolve(repoRoot, PERPDEX_NETWORK_PROFILES[sibling].files.verifierPublicKeys);
+    if (!fs.existsSync(siblingFile)) {
+      throw new Error(`cannot prove ${profile.name} verifier quorum is distinct: ${sibling} config is missing`);
+    }
+    const shared = normalizedVerifierKeys(readJson<VerifierConfig>(siblingFile)).filter((key) => own.has(key));
+    if (shared.length > 0) {
+      throw new Error(
+        `${profile.name} verifier quorum shares ${shared.length} key(s) with ${sibling}; signed batches would replay across Endpoints`
+      );
+    }
+  }
+}
+
+export function loadVerifierConfig(
+  file: string,
+  profile: PerpdexNetworkProfile = PERPDEX_NETWORK,
+  repoRoot = path.resolve(__dirname, '..')
+): VerifierConfig {
+  const config = readJson<VerifierConfig>(file);
+  if (config.chainId !== profile.chainId || config.signerBitmask !== 7) {
+    throw new Error(`verifier public-key file must target chain ${profile.chainId} and bitmask 7`);
+  }
+  if (config.keys.length !== 3) {
+    throw new Error('audited Endpoint hardcodes bitmask 7; exactly three verifier keys are required');
+  }
+  const normalizedKeys = normalizedVerifierKeys(config);
   if (new Set(normalizedKeys).size !== normalizedKeys.length) {
     throw new Error('verifier public keys must be three distinct secp256k1 points');
   }
+  assertDistinctVerifierQuorum(config, profile, repoRoot);
   return config;
 }
 
