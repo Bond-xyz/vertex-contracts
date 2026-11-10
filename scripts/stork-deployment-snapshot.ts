@@ -595,6 +595,8 @@ export function assertSequencerLeverageEvidence(profile: PerpdexNetworkProfile):
   const expectedLanes = [profile.name, ...profile.distinctVerifierQuorumFrom].sort();
   if (
     evidence.maxLeverage !== Number(profile.riskModel.maximumLeverage) ||
+    !Number.isSafeInteger(evidence.shortOpeningCollateralPpb) ||
+    evidence.shortOpeningCollateralPpb < profile.riskModel.weights.shortWeightInitial - 1_000_000_000 ||
     JSON.stringify(lanes) !== JSON.stringify(expectedLanes) ||
     evidence.lanes.some((lane) => lane.files.length === 0)
   ) {

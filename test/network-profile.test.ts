@@ -216,6 +216,28 @@ describe('PerpDex network profiles', () => {
       );
     }
     expect(() => assertSequencerLeverageEvidence(PERPDEX_NETWORK_PROFILES.galileo)).not.to.throw();
+    const file0 = { path: 'services/trading/run/config.toml', blob: 'a'.repeat(40), sha256: 'b'.repeat(64) };
+    const evidence = (shortOpeningCollateralPpb: number, maxLeverage = 1) => ({
+      ...mainnet,
+      sequencerLeverageEvidence: {
+        required: true,
+        evidence: {
+          repository: 'Bond-xyz/bond-perpdex',
+          commit: 'c'.repeat(40),
+          tree: 'd'.repeat(40),
+          maxLeverage,
+          shortOpeningCollateralPpb,
+          lanes: [
+            { deployment: 'og-mainnet' as const, files: [file0] },
+            { deployment: 'og-mainnet-usdz' as const, files: [file0] },
+          ],
+        },
+      },
+    });
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001))).not.to.throw();
+    // The integer 1x cap alone (exact-notional short reserve) is not sufficient.
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_000))).to.throw('does not preserve');
+    expect(() => assertSequencerLeverageEvidence(evidence(1_000_000_001, 20))).to.throw('does not preserve');
   });
 
   it('keeps the audited contract baseline identical across Galileo and mainnet', () => {

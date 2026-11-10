@@ -118,6 +118,8 @@ Longs are capped at exactly 1x. `shortWeightInitial` is 2.000000001, not 2.0, be
 - a 1x short becomes liquidatable at +33.3%;
 - with zero insurance, bad debt is socialized across open interest.
 
+**Short-side epsilon:** the short bound is conservative, not an exact zero. A short with notional equal to its collateral has initial health `-1e-9 × notional`, so it is refused. A short needs collateral of at least `ceil(short notional × 1_000_000_001 / 1_000_000_000)`. Because `OffchainExchange` matching bypasses health, the sequencer's integer `max_leverage = 1` cap alone, which reserves exactly the notional, would let a full 1x short open already unhealthy. Deployment stays blocked until backend exact-order admission adds that short-side ppb buffer (or an equivalent). The gate requires `shortOpeningCollateralPpb ≥ shortWeightInitial − 1e9` in the sequencer evidence.
+
 **Sequencer cap gate:** `OffchainExchange` matching does not enforce health, so the sequencer's `max_leverage` is what actually enforces 1x. `assertSequencerLeverageEvidence` (first step of `collectGalileoStaticReleasePolicy`) refuses mainnet until `profile.sequencerLeverageEvidence.evidence` is set. It must pin the reviewed production trading runtime config (repository, commit, tree, and per-file blob and SHA-256) with `maxLeverage = 1` for both lanes (`og-mainnet` and `og-mainnet-usdz`).
 
 **Insurance fund:** the deployment config has no insurance setting. `Clearinghouse.insurance` starts at 0 and only changes through owner `depositInsurance`, which this pipeline never calls. Insurance is therefore zero at launch.

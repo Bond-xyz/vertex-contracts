@@ -69,9 +69,18 @@ describe('0G mainnet 1x launch weights (contract health math)', () => {
     expect(collateral.add(await perp.getHealthContribution(subaccount(2), INITIAL)).lt(0)).to.equal(true);
   });
 
-  it('caps shorts strictly below 1x and rejects a full 1x or larger short', async () => {
+  it('leaves a full integer-1x short slightly unhealthy: shorts need ceil(notional * 1.000000001) collateral', async () => {
     const { perp } = await deployEngines();
     const collateral = PRICE;
+    const buffered = notional(ONE).mul(1_000_000_001).add(999_999_999).div(1_000_000_000);
+    await perp.setBalanceForTest(PRODUCT_ID, subaccount(3), ONE.mul(-1), notional(ONE));
+    expect(buffered.add(await perp.getHealthContribution(subaccount(3), INITIAL)).gte(0)).to.equal(true);
+    expect(
+      buffered
+        .sub(1)
+        .add(await perp.getHealthContribution(subaccount(3), INITIAL))
+        .lt(0)
+    ).to.equal(true);
     // 1 / 1.000000001 of collateral is the largest short that keeps initial health >= 0.
     const underOne = ONE.mul(1_000_000_000).div(1_000_000_001);
     await perp.setBalanceForTest(PRODUCT_ID, subaccount(1), underOne.mul(-1), notional(underOne));

@@ -77,6 +77,10 @@ export type PerpdexNetworkProfile = {
       commit: string;
       tree: string;
       maxLeverage: number;
+      // Exact-order admission must reserve ceil(shortNotional * ppb / 1e9) for a
+      // short; at least shortWeightInitial - 1e9 (1_000_000_001 on mainnet) or a
+      // full integer-1x short opens with negative on-chain initial health.
+      shortOpeningCollateralPpb: number;
       lanes: readonly {
         deployment: PerpdexNetworkName;
         files: readonly { path: string; blob: string; sha256: string }[];
