@@ -12,6 +12,7 @@ import {
   PERPDEX_COLLATERAL_DECIMALS,
   PERPDEX_COLLATERAL_SYMBOL,
   initialPrices,
+  requirePinnedDeployer,
   requireProfileCollateral,
   resolveProductsWithStorkPrices,
   resolveSequencer,
@@ -35,16 +36,14 @@ import {
   verifyVerifierQuorumConfiguration,
   verifyVirtualBookProductId,
 } from './release-evidence';
+import { assertDeploymentIntentAvailableForFirstTransaction } from './release-attestation';
 import {
-  assertDeploymentIntentAvailableForFirstTransaction,
-  TRACKED_GALILEO_RELEASE_POLICY,
-} from './release-attestation';
-import {
-  assertSameVerifiedRedTestnetReleaseEvidence,
-  collectAndVerifyRedTestnetReleaseEvidence,
-  TRACKED_RED_GALILEO_APPROVAL,
-  VerifiedRedTestnetReleaseEvidence,
-} from './red-testnet-approval';
+  assertSameReleaseApproval,
+  collectAndVerifyReleaseApproval,
+  releaseApprovalManifestRecord,
+  VerifiedReleaseApproval,
+} from './release-approval';
+import { TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
 import {
   assertStorkObservationBlock,
@@ -214,6 +213,7 @@ type ReleaseFiles = {
   verifierFile: string;
   productReviewFile: string;
   approvalFile: string;
+  attestationFile: string;
   deploymentIntentFile: string;
   preparedFile: string;
   finalizationJournalFile: string;
@@ -237,6 +237,9 @@ function releaseFiles(): ReleaseFiles {
     ),
     productReviewFile: path.resolve(process.env.PERPDEX_PRODUCT_REVIEW_FILE || PERPDEX_NETWORK.files.productReview),
     approvalFile: path.resolve(process.env.PERPDEX_RED_APPROVAL_FILE || TRACKED_RED_GALILEO_APPROVAL),
+    attestationFile: path.resolve(
+      process.env.PERPDEX_RELEASE_ATTESTATION_FILE || PERPDEX_NETWORK.files.releaseAttestation
+    ),
     deploymentIntentFile: path.resolve(
       process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent
     ),
@@ -271,13 +274,14 @@ async function checkedQuote(): Promise<string> {
   return quote;
 }
 
-function redEvidenceInput(files: ReleaseFiles) {
+function releaseApprovalInput(files: ReleaseFiles) {
   return {
     artifacts,
     productsFile: files.productsFile,
     productReviewFile: files.productReviewFile,
     verifierFile: files.verifierFile,
     approvalFile: files.approvalFile,
+    attestationFile: files.attestationFile,
     deploymentIntentFile: files.deploymentIntentFile,
   };
 }
@@ -289,7 +293,7 @@ function writeExclusiveJson(file: string, value: unknown): void {
 
 async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise<void> {
   // Static approval/provenance is verified before the first preparation transaction.
-  const preflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
+  const preflight = await collectAndVerifyReleaseApproval(releaseApprovalInput(files));
   const quote = await checkedQuote();
   const contractDiff = await collectContractInterfaceDiff();
   const releaseStateHostIdentity = ensureLocalReleaseStateHostIdentity();
@@ -476,8 +480,8 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
     preflight.build.artifacts.clearinghouseLiq
   );
 
-  const postflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
-  assertSameVerifiedRedTestnetReleaseEvidence(preflight, postflight);
+  const postflight = await collectAndVerifyReleaseApproval(releaseApprovalInput(files));
+  assertSameReleaseApproval(preflight, postflight);
   const preparationTerminalBlockNumber = await ethers.provider.getBlockNumber();
   const preparationTerminalBlock = await ethers.provider.getBlock(preparationTerminalBlockNumber);
   if (!preparationTerminalBlock?.hash) throw new Error('preparation terminal block is unavailable');
@@ -500,8 +504,9 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
       productConfigSha256: postflight.productConfigSha256,
       productReviewSha256: postflight.productReviewSha256,
       verifierPublicKeysSha256: postflight.verifierConfigSha256,
-      redApprovalSha256: postflight.approvalSha256,
-      redApprovalDigest: postflight.approvalDigest,
+      approvalMode: postflight.mode,
+      approvalSha256: postflight.approvalSha256,
+      approvalDigest: postflight.approvalDigest,
       storkPolicySha256: postflight.staticPolicy.policySha256,
       collateralProvenanceSha256: postflight.staticPolicy.collateralProvenanceSha256,
       contractInterfaceDiff: contractDiff,
@@ -538,7 +543,7 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
   console.log('Capture a fresh signed Stork snapshot, then run the explicit finalize phase.');
 }
 
-function assertPreparedBinding(prepared: PreparedDeployment, preflight: VerifiedRedTestnetReleaseEvidence): void {
+function assertPreparedBinding(prepared: PreparedDeployment, preflight: VerifiedReleaseApproval): void {
   const expectedProducts = preflight.products.products;
   const expectedSymbols = expectedProducts.map((product) => product.symbol);
   const preparedSymbols = Object.keys(prepared.markets || {});
@@ -612,8 +617,9 @@ function assertPreparedBinding(prepared: PreparedDeployment, preflight: Verified
     prepared.source?.productConfigSha256 !== preflight.productConfigSha256 ||
     prepared.source?.productReviewSha256 !== preflight.productReviewSha256 ||
     prepared.source?.verifierPublicKeysSha256 !== preflight.verifierConfigSha256 ||
-    prepared.source?.redApprovalSha256 !== preflight.approvalSha256 ||
-    prepared.source?.redApprovalDigest !== preflight.approvalDigest ||
+    prepared.source?.approvalMode !== preflight.mode ||
+    prepared.source?.approvalSha256 !== preflight.approvalSha256 ||
+    prepared.source?.approvalDigest !== preflight.approvalDigest ||
     prepared.source?.storkPolicySha256 !== preflight.staticPolicy.policySha256 ||
     prepared.source?.collateralProvenanceSha256 !== preflight.staticPolicy.collateralProvenanceSha256 ||
     prepared.deploymentIntent?.deploymentId !== preflight.deploymentIntent.deploymentId ||
@@ -639,7 +645,7 @@ function assertPreparedBinding(prepared: PreparedDeployment, preflight: Verified
 }
 
 async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promise<void> {
-  const preflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
+  const preflight = await collectAndVerifyReleaseApproval(releaseApprovalInput(files));
   const prepared = JSON.parse(fs.readFileSync(files.preparedFile, 'utf8')) as PreparedDeployment;
   assertPreparedBinding(prepared, preflight);
   const quote = await checkedQuote();
@@ -977,8 +983,9 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
         ])
       );
 
-      const postflight = await collectAndVerifyRedTestnetReleaseEvidence(redEvidenceInput(files));
-      assertSameVerifiedRedTestnetReleaseEvidence(preflight, postflight);
+      const postflight = await collectAndVerifyReleaseApproval(releaseApprovalInput(files));
+      assertSameReleaseApproval(preflight, postflight);
+      const approvalRecord = releaseApprovalManifestRecord(postflight);
       const manifest = {
         schemaVersion: 9,
         release: PERPDEX_RELEASE_ID,
@@ -1022,20 +1029,13 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
           storkSnapshotSha256: storkPreflight.snapshotSha256,
           collateralProvenanceSha256: storkPreflight.collateralProvenanceSha256,
           verifierPublicKeysSha256: postflight.verifierConfigSha256,
-          redTestnetApproval: {
-            policyFile: TRACKED_GALILEO_RELEASE_POLICY,
-            policyId: postflight.policy.policyId,
-            policyVersion: postflight.policy.policyVersion,
-            policySha256: postflight.policySha256,
-            approvalFile: TRACKED_RED_GALILEO_APPROVAL,
-            approvalSha256: postflight.approvalSha256,
-            digest: postflight.approvalDigest,
-            approval: postflight.approval,
-          },
+          [approvalRecord.key]: approvalRecord.record,
           explicitDeltas: [
             'restore omitted Version.sol implementation',
             'enforce OffchainExchange order signatures',
-            'pin product zero to existing Galileo USDC.e',
+            `pin product zero to existing ${
+              PERPDEX_NETWORK.name === 'galileo' ? 'Galileo' : PERPDEX_NETWORK.displayName
+            } ${PERPDEX_COLLATERAL_SYMBOL}`,
             'initialize every launch price from one fresh signed Stork snapshot',
           ],
           contractInterfaceDiff: latestContractDiff,
@@ -1047,7 +1047,10 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
         roles: {
           deployer: prepared.deployer,
           sequencer: prepared.sequencer,
-          releaseApprover: { name: 'Red', role: 'product_and_release_owner', mode: 'tracked_galileo_testnet_artifact' },
+          releaseApprover:
+            postflight.approver.address === null
+              ? { name: postflight.approver.name, role: postflight.approver.role, mode: postflight.approver.mode }
+              : postflight.approver,
           mainnetExternalReviewRequired: true,
           contractOwner: prepared.deployer,
           proxyAdminOwner: prepared.deployer,
@@ -1146,8 +1149,9 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
           updatePerpBalanceAbsent: true,
           slowModeExitPreserved: true,
           productRiskConfigApproved: true,
-          trackedRedTestnetApprovalVerifiedPreAndPost: true,
-          deterministicCiAndIndependentAgentReviewBound: true,
+          trackedRedTestnetApprovalVerifiedPreAndPost: postflight.mode === 'tracked_red_testnet_approval',
+          externalReviewerAttestationVerifiedPreAndPost: postflight.mode === 'external_reviewer_signature',
+          deterministicCiAndIndependentAgentReviewBound: postflight.mode === 'tracked_red_testnet_approval',
           mainnetExternalReviewWaived: false,
           signedDeploymentIntentSingleUseNonce: true,
           freshOpenZeppelinNetworkManifest: true,
@@ -1189,20 +1193,15 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
 }
 
 async function main(): Promise<void> {
-  // Mainnet profiles have a custody-held (Fordefi) deployer and external-review
-  // approval; this local-EOA, Red-approved script refuses them before any RPC call.
   const deployerKeyEnv = PERPDEX_NETWORK.deployerPrivateKeyEnv;
-  if (deployerKeyEnv === null || PERPDEX_NETWORK.approvalMode !== 'tracked_red_testnet_approval') {
-    throw new Error(
-      `refusing ${PERPDEX_NETWORK.name} deployment: this script signs with a local EOA under tracked Red testnet approval only`
-    );
-  }
+  if (deployerKeyEnv === null) throw new Error(`refusing ${PERPDEX_NETWORK.name} deployment: no local deployer key`);
   const phase = process.env.PERPDEX_DEPLOY_PHASE;
   const files = releaseFiles();
   const configuredGasPriceWei = resolveGalileoLegacyGasPrice();
   const privateKey = process.env[deployerKeyEnv];
   if (!privateKey) throw new Error(`${deployerKeyEnv} is required`);
   const deployer = new GalileoLegacyFeeWallet(privateKey, ethers.provider, configuredGasPriceWei);
+  requirePinnedDeployer(deployer.address);
   const populatedTransaction = await deployer.populateTransaction({
     to: deployer.address,
     value: 0,

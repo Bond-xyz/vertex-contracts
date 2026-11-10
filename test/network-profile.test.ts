@@ -10,6 +10,7 @@ import {
   OG_MAINNET_CHAIN_ID,
   PERPDEX_NETWORK,
   PERPDEX_NETWORK_PROFILES,
+  requirePinnedDeployer,
   requireProfileCollateral,
   resolveNetworkProfile,
   resolveSequencer,
@@ -40,8 +41,10 @@ describe('PerpDex network profiles', () => {
     expect(usdz.deploymentsDir).to.equal('deployments/16661/og-mainnet-usdz');
     expect(usdz.marketSymbols).to.deep.equal(['BTCUSDZPERP', 'ETHUSDZPERP', 'SOLUSDZPERP', '0GUSDZPERP']);
     for (const profile of [mainnet, usdz]) {
-      expect(profile.deployerPrivateKeyEnv).to.equal(null);
+      expect(profile.deployerPrivateKeyEnv).to.equal('PERPDEX_OG_MAINNET_DEPLOYER_PRIVATE_KEY');
+      expect(profile.operators.deployer).to.equal('0x07b735E020549ba56AAb8e3370d102C2Df6cabF7');
       expect(profile.approvalMode).to.equal('external_reviewer_signature');
+      expect(profile.releaseReviewer).to.deep.equal({ name: 'Adam', address: null });
       expect(profile.files.redApproval).to.equal(null);
     }
   });
@@ -55,6 +58,11 @@ describe('PerpDex network profiles', () => {
     expect(() => resolveSequencer(undefined, deployer, mainnet)).to.throw('pinned production sequencer');
     expect(() => resolveSequencer(deployer, deployer, usdz)).to.throw('pinned production sequencer');
     expect(() => requireProfileCollateral(mainnet.collateral.address, usdz)).to.throw('substitutes are forbidden');
+    expect(requirePinnedDeployer('0x07b735e020549ba56aab8e3370d102c2df6cabf7', usdz)).to.equal(
+      '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7'
+    );
+    expect(() => requirePinnedDeployer(deployer, mainnet)).to.throw('pinned deployer');
+    expect(requirePinnedDeployer(deployer, PERPDEX_NETWORK_PROFILES.galileo)).to.equal(utils.getAddress(deployer));
   });
 
   it('keeps mainnet config files bound to their own profile', () => {
@@ -77,7 +85,14 @@ describe('PerpDex network profiles', () => {
       const release = readJson(profile.files.releasePolicy);
       expect(release.releaseId).to.equal(profile.releaseId);
       expect(release.status).not.to.equal(profile.activeReleaseStatus);
-      expect(readJson(profile.files.feePolicy).status).not.to.equal(profile.activeReleaseStatus);
+      expect(release.reviewers).to.deep.equal([]);
+      const fee = readJson(profile.files.feePolicy);
+      expect(fee.status).to.equal(profile.activeReleaseStatus);
+      expect(fee.requiredEnvironmentVariable).to.equal(profile.gasPriceEnv);
+      expect(fee.observation).to.include({ blockNumber: 49846964, gasPriceWei: '4000000007' });
+      expect(BigInt(fee.minimumGasPriceWei)).to.equal(profile.pins.feeBoundsWei?.minimum);
+      expect(BigInt(fee.defaultGasPriceWei)).to.equal(profile.pins.feeBoundsWei?.default);
+      expect(BigInt(fee.maximumGasPriceWei)).to.equal(profile.pins.feeBoundsWei?.maximum);
       expect(readJson(profile.files.storkPolicy).feeds.map((feed: { symbol: string }) => feed.symbol)).to.deep.equal([
         ...profile.marketSymbols,
       ]);

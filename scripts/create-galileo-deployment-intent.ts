@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { PERPDEX_NETWORK, resolveSequencer } from './deployment-config';
+import { PERPDEX_NETWORK, requirePinnedDeployer, resolveSequencer } from './deployment-config';
 import { createGalileoDeploymentIntent } from './release-attestation';
 import { collectGalileoStaticReleasePolicy } from './stork-deployment-snapshot';
 
@@ -20,7 +20,7 @@ export function createTrackedGalileoDeploymentIntent(): void {
   // 30-second snapshot is intentionally deferred to the actual deploy preflight.
   const staticPolicy = collectGalileoStaticReleasePolicy();
   const output = path.resolve(process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent);
-  const deployer = required(process.env.PERPDEX_DEPLOYER_ADDRESS, 'PERPDEX_DEPLOYER_ADDRESS');
+  const deployer = requirePinnedDeployer(required(process.env.PERPDEX_DEPLOYER_ADDRESS, 'PERPDEX_DEPLOYER_ADDRESS'));
   const intent = createGalileoDeploymentIntent({
     deploymentNonce: required(process.env.PERPDEX_DEPLOYMENT_NONCE, 'PERPDEX_DEPLOYMENT_NONCE'),
     expiresAt: requiredNumber(process.env.PERPDEX_RELEASE_EXPIRES_AT, 'PERPDEX_RELEASE_EXPIRES_AT'),

@@ -30,8 +30,8 @@ import {
   verifyVirtualBookProductId,
   sha256File,
 } from './release-evidence';
-import { TRACKED_GALILEO_RELEASE_POLICY } from './release-attestation';
-import { collectAndVerifyRedTestnetReleaseEvidence, TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
+import { collectAndVerifyReleaseApproval, releaseApprovalManifestRecord } from './release-approval';
+import { TRACKED_RED_GALILEO_APPROVAL } from './red-testnet-approval';
 import { collectContractInterfaceDiff } from './contract-interface-diff';
 import {
   assertStorkDeploymentSnapshotFresh,
@@ -148,22 +148,27 @@ async function main() {
   const deploymentIntentFile = path.resolve(
     process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent
   );
-  const recordedApproval = manifest.source.redTestnetApproval;
-  if (
-    !recordedApproval ||
-    recordedApproval.policyFile !== TRACKED_GALILEO_RELEASE_POLICY ||
-    recordedApproval.approvalFile !== TRACKED_RED_GALILEO_APPROVAL
-  ) {
-    throw new Error('deployment manifest is missing the tracked Red Galileo-testnet approval policy');
-  }
-  const verifiedRelease = await collectAndVerifyRedTestnetReleaseEvidence({
+  const attestationFile = path.resolve(
+    process.env.PERPDEX_RELEASE_ATTESTATION_FILE || PERPDEX_NETWORK.files.releaseAttestation
+  );
+  const verifiedRelease = await collectAndVerifyReleaseApproval({
     artifacts,
     productsFile,
     productReviewFile,
     verifierFile,
     approvalFile,
+    attestationFile,
     deploymentIntentFile,
   });
+  const expectedApproval = releaseApprovalManifestRecord(verifiedRelease);
+  const recordedApproval = manifest.source[expectedApproval.key];
+  if (
+    !recordedApproval ||
+    recordedApproval.policyFile !== expectedApproval.record.policyFile ||
+    recordedApproval.approvalFile !== expectedApproval.record.approvalFile
+  ) {
+    throw new Error(`deployment manifest is missing the tracked ${PERPDEX_NETWORK.name} release approval`);
+  }
   if (
     manifest.source.backendProtocolBaselineCommit !== BACKEND_BETA_COMMIT ||
     JSON.stringify(manifest.source.backendRuntimeRelease) !==
@@ -198,7 +203,7 @@ async function main() {
     manifest.deployer !== verifiedRelease.deploymentIntent.deployer ||
     manifest.sequencer !== verifiedRelease.deploymentIntent.sequencer
   ) {
-    throw new Error('deployment manifest operators do not match the Red-approved deployment intent');
+    throw new Error('deployment manifest operators do not match the approved deployment intent');
   }
   if (
     manifest.deploymentIntent.expectedFirstContract !== manifest.contracts.sanctions.address ||
@@ -206,7 +211,7 @@ async function main() {
     manifest.openZeppelin?.manifestFile !== `.openzeppelin/unknown-${PERPDEX_CHAIN_ID}.json` ||
     !/^[0-9a-f]{64}$/i.test(manifest.openZeppelin?.manifestSha256 || '')
   ) {
-    throw new Error('deployment manifest does not prove the Red-approved fresh-deployment boundary');
+    throw new Error('deployment manifest does not prove the approved fresh-deployment boundary');
   }
   if (
     manifest.preparation?.phase !== 'prepared_no_price_writes' ||
@@ -520,9 +525,10 @@ async function main() {
     manifest.roles?.sequencer !== manifest.sequencer ||
     manifest.roles?.contractOwner !== manifest.deployer ||
     manifest.roles?.proxyAdminOwner !== manifest.deployer ||
-    manifest.roles?.releaseApprover?.name !== 'Red' ||
-    manifest.roles?.releaseApprover?.role !== 'product_and_release_owner' ||
-    manifest.roles?.releaseApprover?.mode !== 'tracked_galileo_testnet_artifact' ||
+    manifest.roles?.releaseApprover?.name !== verifiedRelease.approver.name ||
+    manifest.roles?.releaseApprover?.role !== verifiedRelease.approver.role ||
+    manifest.roles?.releaseApprover?.mode !== verifiedRelease.approver.mode ||
+    (manifest.roles?.releaseApprover?.address ?? null) !== verifiedRelease.approver.address ||
     manifest.roles?.mainnetExternalReviewRequired !== true ||
     manifest.roles?.verifierKeys?.count !== verifierConfig.keys.length ||
     manifest.roles?.verifierKeys?.signerBitmask !== verifierConfig.signerBitmask ||
@@ -533,7 +539,7 @@ async function main() {
 
   const minimumDeploymentNonce = manifest.deploymentIntent.firstTransactionNonce;
   if (manifest.contracts.sanctions.creation?.transactionNonce !== minimumDeploymentNonce) {
-    throw new Error('Red-approved deployment intent was not consumed by the first sanctions deployment');
+    throw new Error('approved deployment intent was not consumed by the first sanctions deployment');
   }
   await verifyContractCreationEvidence(
     ethers.provider,

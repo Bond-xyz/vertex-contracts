@@ -332,6 +332,13 @@ export function validateDeploymentIntent(intent: GalileoDeploymentIntent): Galil
     storkPolicySha256: intent.storkPolicySha256,
     collateralProvenanceSha256: intent.collateralProvenanceSha256,
   });
+  const { deployer: pinnedDeployer, sequencer: pinnedSequencer } = PERPDEX_NETWORK.operators;
+  if (
+    (pinnedDeployer !== null && normalized.deployer !== utils.getAddress(pinnedDeployer)) ||
+    (pinnedSequencer !== null && normalized.sequencer !== utils.getAddress(pinnedSequencer))
+  ) {
+    throw new Error(`deployment intent operators must be the pinned ${PERPDEX_NETWORK.name} deployer and sequencer`);
+  }
   if (utils.getAddress(intent.expectedFirstContract) !== normalized.expectedFirstContract) {
     throw new Error('deployment intent expected first contract does not match deployer nonce');
   }
@@ -441,6 +448,16 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
   if (policy.approvalMode === 'external_reviewer_signature') {
     if (policy.requiredReviewerSignatures !== 1 || policy.redApprovalArtifact !== null) {
       throw new Error('external reviewer policy requires one signature and no Red approval artifact');
+    }
+    const pinnedReviewer = PERPDEX_NETWORK.releaseReviewer;
+    if (pinnedReviewer !== null) {
+      const expected =
+        pinnedReviewer.address === null
+          ? []
+          : [{ name: pinnedReviewer.name, address: utils.getAddress(pinnedReviewer.address) }];
+      if (JSON.stringify(normalizedReviewers) !== JSON.stringify(expected)) {
+        throw new Error(`release policy reviewers must be exactly the pinned ${PERPDEX_NETWORK.name} reviewer`);
+      }
     }
   } else if (policy.approvalMode === 'tracked_red_testnet_approval') {
     if (

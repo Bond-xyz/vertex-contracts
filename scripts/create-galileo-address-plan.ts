@@ -2,9 +2,15 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { utils } from 'ethers';
-import { deploymentStateFile, PERPDEX_NETWORK, PerpdexNetworkProfile, resolveSequencer } from './deployment-config';
+import {
+  deploymentStateFile,
+  PERPDEX_NETWORK,
+  PerpdexNetworkProfile,
+  requirePinnedDeployer,
+  resolveSequencer,
+} from './deployment-config';
 
-export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = '7f1fe3541c9a322e80e058eabf8076ecb46cf0071dd8ee7292a1985771c3ad37';
+export const GALILEO_DEPLOYMENT_SCRIPT_SHA256 = 'be6287d6d01a67c9a29ee5f61244608186447066acd1ceacfcd8504e6ad34284';
 export const GALILEO_PREPARE_TRANSACTION_COUNT = 24;
 export const GALILEO_FINALIZE_TRANSACTION_COUNT = 5;
 
@@ -75,7 +81,7 @@ export function createGalileoAddressPlan(
   nonceInput: number,
   profile: PerpdexNetworkProfile = PERPDEX_NETWORK
 ) {
-  const deployer = nonzeroAddress(deployerInput, 'deployer');
+  const deployer = nonzeroAddress(requirePinnedDeployer(deployerInput, profile), 'deployer');
   const sequencer = nonzeroAddress(resolveSequencer(sequencerInput, deployer, profile), 'sequencer');
   const firstTransactionNonce = safeNonce(nonceInput);
   const createAddress = (offset: number): string =>

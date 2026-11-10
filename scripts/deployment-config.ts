@@ -26,7 +26,7 @@ export type PerpdexNetworkProfile = {
   rpcUrlEnv: string;
   legacyRpcUrlEnv: string | null;
   chainIdEnv: string;
-  // null means the deployer is custody-held (Fordefi); a local private key is never accepted.
+  // null means the profile has no local signer and the deploy script refuses it.
   deployerPrivateKeyEnv: string | null;
   gasPriceEnv: string;
   explorer: string;
@@ -34,7 +34,9 @@ export type PerpdexNetworkProfile = {
   marketSymbols: readonly [string, string, string, string];
   approvalMode: ReleaseApprovalMode;
   activeReleaseStatus: string;
-  operators: { sequencer: string | null; contractAdmin: string | null };
+  operators: { deployer: string | null; sequencer: string | null; contractAdmin: string | null };
+  // Pinned external release reviewer; a null address keeps the reviewer allowlist empty (blocked).
+  releaseReviewer: { name: string; address: string | null } | null;
   // Endpoint.submitTransactionsChecked signs keccak(idx, transactions) with no
   // chainId or Endpoint address, so a batch signed for one deployment replays on
   // any other Endpoint whose nSubmissions matches. Deployments listed here must
@@ -65,6 +67,7 @@ export type PerpdexNetworkProfile = {
     storkPolicy: string;
     storkSnapshot: string;
     redApproval: string | null;
+    releaseAttestation: string;
     verifierPublicKeys: string;
     verifierPrivateKeys: string | null;
     deploymentIntent: string;
@@ -95,7 +98,8 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
   marketSymbols: ['BTCUSDCPERP', 'ETHUSDCPERP', 'SOLUSDCPERP', '0GUSDCPERP'],
   approvalMode: 'tracked_red_testnet_approval',
   activeReleaseStatus: 'approved_for_galileo_testnet_release',
-  operators: { sequencer: null, contractAdmin: null },
+  operators: { deployer: null, sequencer: null, contractAdmin: null },
+  releaseReviewer: null,
   distinctVerifierQuorumFrom: [],
   ids: {
     releasePolicy: 'bond-perpdex-galileo-testnet-release',
@@ -156,6 +160,7 @@ const GALILEO_PROFILE: PerpdexNetworkProfile = {
     storkPolicy: 'config/galileo.stork-deployment-policy.json',
     storkSnapshot: 'config/galileo.stork-deployment-snapshot.local.json',
     redApproval: 'config/galileo.red-testnet-approval.json',
+    releaseAttestation: 'config/galileo.release-attestation.local.json',
     verifierPublicKeys: 'config/galileo.verifier-public-keys.local.json',
     verifierPrivateKeys: 'verifier-private-keys.galileo.local.json',
     deploymentIntent: 'config/galileo.deployment-intent.local.json',
@@ -174,22 +179,26 @@ const OG_MAINNET_SHARED = {
   rpcUrlEnv: 'PERPDEX_OG_MAINNET_RPC_URL',
   legacyRpcUrlEnv: 'PERPDEX_MAINNET_RPC_URL',
   chainIdEnv: 'OG_MAINNET_CHAIN_ID',
-  deployerPrivateKeyEnv: null,
+  deployerPrivateKeyEnv: 'PERPDEX_OG_MAINNET_DEPLOYER_PRIVATE_KEY',
   gasPriceEnv: 'PERPDEX_OG_MAINNET_GAS_PRICE_WEI',
   explorer: 'https://chainscan.0g.ai',
   approvalMode: 'external_reviewer_signature' as const,
   activeReleaseStatus: 'approved_for_og_mainnet_release',
   operators: {
+    deployer: '0x07b735E020549ba56AAb8e3370d102C2Df6cabF7',
     sequencer: '0x2a83BE9CC98d70c20EAC0d8c35b1D035B2741C59',
     contractAdmin: '0x7a3A932F1cc402941f3238292c80d138dA49Be25',
   },
+  // Operator-fill: Adam's reviewer signing address has not been provided yet.
+  releaseReviewer: { name: 'Adam', address: null },
   decisions: {
     storkCoherence: 'approve_exact_og_mainnet_cross_feed_timestamp_spread',
     productReview: 'approve_og_mainnet_vectors_with_verified_stork_deploy_time_prices',
   },
-  // Operator-fill: no reviewed 0G mainnet gas bounds, no merged contract packet
-  // commit, and no reproducible carried-field tuple algorithm exist yet.
-  feeBoundsWei: null,
+  // Bounds around the observed 4000000007 wei eth_gasPrice at 0G mainnet block
+  // 49846964 (same structure as Galileo). Operator-fill: no merged contract
+  // packet commit and no reproducible carried-field tuple algorithm exist yet.
+  feeBoundsWei: { minimum: 2_000_000_007n, default: 4_000_000_007n, maximum: 20_000_000_000n },
   contractPacketBase: null,
   normalizedCarriedFieldTupleSha256: null,
   sharedFiles: {
@@ -245,6 +254,7 @@ function ogMainnetProfile(input: {
     approvalMode: OG_MAINNET_SHARED.approvalMode,
     activeReleaseStatus: OG_MAINNET_SHARED.activeReleaseStatus,
     operators: OG_MAINNET_SHARED.operators,
+    releaseReviewer: OG_MAINNET_SHARED.releaseReviewer,
     distinctVerifierQuorumFrom: [input.sibling],
     ids: {
       releasePolicy: `bond-perpdex-${input.name}-release`,
@@ -279,6 +289,7 @@ function ogMainnetProfile(input: {
       storkPolicy: `${prefix}.stork-deployment-policy.json`,
       storkSnapshot: `${prefix}.stork-deployment-snapshot.local.json`,
       redApproval: null,
+      releaseAttestation: `${prefix}.release-attestation.local.json`,
       verifierPublicKeys: `${prefix}.verifier-public-keys.json`,
       verifierPrivateKeys: null,
       deploymentIntent: `${prefix}.deployment-intent.local.json`,
@@ -400,6 +411,16 @@ export function requireProfileCollateral(value?: string, profile: PerpdexNetwork
 
 export function requireGalileoUsdce(value?: string): string {
   return requireProfileCollateral(value, GALILEO_PROFILE);
+}
+
+export function requirePinnedDeployer(value: string, profile: PerpdexNetworkProfile = PERPDEX_NETWORK): string {
+  if (!utils.isAddress(value)) throw new Error('deployer must be an address');
+  const deployer = utils.getAddress(value);
+  const pinned = profile.operators.deployer;
+  if (pinned !== null && deployer !== utils.getAddress(pinned)) {
+    throw new Error(`${profile.name} deployer must be exactly the pinned deployer ${pinned}`);
+  }
+  return deployer;
 }
 
 // Galileo keeps its historical default (sequencer = deployer when unset). Mainnet
