@@ -3,12 +3,14 @@ import path from 'path';
 import { BigNumber } from 'ethers';
 import { artifacts, ethers } from 'hardhat';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_RELEASE_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
-  requireGalileoUsdce,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_RELEASE_ID,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
+  deploymentStateFile,
+  PERPDEX_NETWORK,
+  requireProfileCollateral,
   resolveProductsWithStorkPrices,
 } from './deployment-config';
 import type { DeploymentProductConfig } from './deployment-config';
@@ -129,22 +131,22 @@ function assertManifestMarketMatchesConfig(
 }
 
 async function main() {
-  const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json');
+  const manifestFile = path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || deploymentStateFile('latest'));
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
   if (manifest.schemaVersion !== 9) {
     throw new Error('deployment manifest must use durable signed-Stork finalization schema version 9');
   }
-  if (manifest.release !== GALILEO_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
-  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json');
+  if (manifest.release !== PERPDEX_RELEASE_ID) throw new Error('deployment manifest release identity mismatch');
+  const productsFile = path.resolve(process.env.PERPDEX_PRODUCTS_FILE || PERPDEX_NETWORK.files.products);
   const verifierFile = path.resolve(
-    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
+    process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || PERPDEX_NETWORK.files.verifierPublicKeys
   );
   const productReviewFile = path.resolve(
-    process.env.PERPDEX_PRODUCT_REVIEW_FILE || './config/galileo.product-approval-review.json'
+    process.env.PERPDEX_PRODUCT_REVIEW_FILE || PERPDEX_NETWORK.files.productReview
   );
   const approvalFile = path.resolve(process.env.PERPDEX_RED_APPROVAL_FILE || TRACKED_RED_GALILEO_APPROVAL);
   const deploymentIntentFile = path.resolve(
-    process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
+    process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent
   );
   const recordedApproval = manifest.source.redTestnetApproval;
   if (
@@ -201,7 +203,7 @@ async function main() {
   if (
     manifest.deploymentIntent.expectedFirstContract !== manifest.contracts.sanctions.address ||
     manifest.openZeppelin?.startedWithoutNetworkManifest !== true ||
-    manifest.openZeppelin?.manifestFile !== `.openzeppelin/unknown-${GALILEO_CHAIN_ID}.json` ||
+    manifest.openZeppelin?.manifestFile !== `.openzeppelin/unknown-${PERPDEX_CHAIN_ID}.json` ||
     !/^[0-9a-f]{64}$/i.test(manifest.openZeppelin?.manifestSha256 || '')
   ) {
     throw new Error('deployment manifest does not prove the Red-approved fresh-deployment boundary');
@@ -358,8 +360,8 @@ async function main() {
   }
   const finalizationJournal = loadAndValidateFinalizationJournal(finalizationJournalFile, {
     schemaVersion: 1,
-    release: GALILEO_RELEASE_ID,
-    chainId: GALILEO_CHAIN_ID,
+    release: PERPDEX_RELEASE_ID,
+    chainId: PERPDEX_CHAIN_ID,
     preparedFileSha256: manifest.preparation.preparedFileSha256,
     snapshotSha256,
     manifestReference: portableArtifactReference(finalizationJournalFile, manifestFile),
@@ -444,14 +446,14 @@ async function main() {
     assertManifestMarketMatchesConfig(product.symbol, manifest.markets[product.symbol], product);
   }
   const network = await ethers.provider.getNetwork();
-  if (network.chainId !== GALILEO_CHAIN_ID || manifest.network.chainId !== GALILEO_CHAIN_ID) {
+  if (network.chainId !== PERPDEX_CHAIN_ID || manifest.network.chainId !== PERPDEX_CHAIN_ID) {
     throw new Error('manifest/network chain mismatch');
   }
-  const collateral = requireGalileoUsdce(manifest.quoteToken);
+  const collateral = requireProfileCollateral(manifest.quoteToken);
   if (
-    manifest.collateral?.address !== GALILEO_USDCE_ADDRESS ||
-    manifest.collateral?.symbol !== GALILEO_USDCE_SYMBOL ||
-    manifest.collateral?.decimals !== GALILEO_USDCE_DECIMALS ||
+    manifest.collateral?.address !== PERPDEX_COLLATERAL_ADDRESS ||
+    manifest.collateral?.symbol !== PERPDEX_COLLATERAL_SYMBOL ||
+    manifest.collateral?.decimals !== PERPDEX_COLLATERAL_DECIMALS ||
     manifest.collateral?.productId !== 0 ||
     manifest.collateral?.source !== 'existing' ||
     manifest.collateral?.deployToken !== false ||
@@ -650,8 +652,8 @@ async function main() {
     throw new Error('spot-engine product 0 token mismatch');
   }
   if (
-    (await quoteContract.decimals()) !== GALILEO_USDCE_DECIMALS ||
-    (await quoteContract.symbol()) !== GALILEO_USDCE_SYMBOL
+    (await quoteContract.decimals()) !== PERPDEX_COLLATERAL_DECIMALS ||
+    (await quoteContract.symbol()) !== PERPDEX_COLLATERAL_SYMBOL
   ) {
     throw new Error('on-chain Galileo USDC.e metadata mismatch');
   }
@@ -689,7 +691,7 @@ async function main() {
     }
   }
   if (
-    manifest.withdrawalContract?.token !== GALILEO_USDCE_ADDRESS ||
+    manifest.withdrawalContract?.token !== PERPDEX_COLLATERAL_ADDRESS ||
     manifest.withdrawalContract?.collateralProductId !== 0 ||
     manifest.withdrawalContract?.directLedgerFeeX18 !== '1000000000000000000' ||
     manifest.withdrawalContract?.slowWalletQueueFeeUnits !== '1000000' ||

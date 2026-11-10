@@ -3,12 +3,14 @@ import path from 'path';
 import { BigNumber, BigNumberish, constants, utils } from 'ethers';
 import type { Artifacts } from 'hardhat/types';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_PROJECT_ID,
-  GALILEO_RELEASE_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  GALILEO_TESTNET_CHAIN_ID,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_NETWORK,
+  PERPDEX_PROJECT_ID,
+  PERPDEX_RELEASE_ID,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
   GalileoProducts,
   loadProducts,
   loadVerifierConfig,
@@ -31,9 +33,9 @@ import {
   GalileoStaticReleasePolicy,
 } from './stork-deployment-snapshot';
 
-export const TRACKED_GALILEO_RELEASE_POLICY = 'config/galileo.release-policy.json';
+export const TRACKED_GALILEO_RELEASE_POLICY = PERPDEX_NETWORK.files.releasePolicy;
 export const RELEASE_ATTESTATION_SCHEMA_VERSION = 3;
-export const ACTIVE_GALILEO_RELEASE_POLICY_STATUS = 'approved_for_galileo_testnet_release';
+export const ACTIVE_GALILEO_RELEASE_POLICY_STATUS = PERPDEX_NETWORK.activeReleaseStatus;
 
 export type GalileoReleaseReviewer = {
   name: string;
@@ -268,9 +270,9 @@ export function createGalileoDeploymentIntent(input: {
     true
   );
   const identity: DeploymentIntentIdentity = {
-    projectId: GALILEO_PROJECT_ID,
-    releaseId: GALILEO_RELEASE_ID,
-    chainId: GALILEO_CHAIN_ID,
+    projectId: PERPDEX_PROJECT_ID,
+    releaseId: PERPDEX_RELEASE_ID,
+    chainId: PERPDEX_CHAIN_ID,
     backendBetaCommit: normalizedGitObject(input.backendBetaCommit, 'deployment intent backend beta commit'),
     storkPolicySha256: normalizedSha256(input.storkPolicySha256, 'deployment intent Stork policy SHA-256'),
     collateralProvenanceSha256: normalizedSha256(
@@ -314,9 +316,9 @@ export function validateDeploymentIntent(intent: GalileoDeploymentIntent): Galil
   );
   if (
     intent.schemaVersion !== 2 ||
-    intent.projectId !== GALILEO_PROJECT_ID ||
-    intent.releaseId !== GALILEO_RELEASE_ID ||
-    intent.chainId !== GALILEO_CHAIN_ID
+    intent.projectId !== PERPDEX_PROJECT_ID ||
+    intent.releaseId !== PERPDEX_RELEASE_ID ||
+    intent.chainId !== PERPDEX_CHAIN_ID
   ) {
     throw new Error('deployment intent project/release/chain identity mismatch');
   }
@@ -407,8 +409,8 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
     !policy.policyId ||
     !Number.isSafeInteger(policy.policyVersion) ||
     policy.policyVersion <= 0 ||
-    policy.projectId !== GALILEO_PROJECT_ID ||
-    policy.releaseId !== GALILEO_RELEASE_ID ||
+    policy.projectId !== PERPDEX_PROJECT_ID ||
+    policy.releaseId !== PERPDEX_RELEASE_ID ||
     !policy.attestationDomain?.name ||
     !policy.attestationDomain?.version ||
     !policy.status
@@ -416,13 +418,13 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
     throw new Error('release policy identity/version is invalid');
   }
   if (
-    policy.chainId !== GALILEO_CHAIN_ID ||
-    utils.getAddress(policy.collateral.address) !== GALILEO_USDCE_ADDRESS ||
+    policy.chainId !== PERPDEX_CHAIN_ID ||
+    utils.getAddress(policy.collateral.address) !== PERPDEX_COLLATERAL_ADDRESS ||
     policy.collateral.productId !== 0 ||
-    policy.collateral.symbol !== GALILEO_USDCE_SYMBOL ||
-    policy.collateral.decimals !== GALILEO_USDCE_DECIMALS
+    policy.collateral.symbol !== PERPDEX_COLLATERAL_SYMBOL ||
+    policy.collateral.decimals !== PERPDEX_COLLATERAL_DECIMALS
   ) {
-    throw new Error('release policy must pin exact Galileo USDC.e collateral');
+    throw new Error(`release policy must pin exact ${PERPDEX_NETWORK.name} ${PERPDEX_COLLATERAL_SYMBOL} collateral`);
   }
   if (!Array.isArray(policy.reviewers)) throw new Error('release policy reviewers must be an array');
   const normalizedReviewers = policy.reviewers.map((reviewer, index) => {
@@ -434,7 +436,7 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
     throw new Error('release policy reviewer addresses must be unique');
   }
   if (policy.mainnetExternalReviewRequired !== true) {
-    throw new Error('Galileo testnet policy must not waive mainnet external review');
+    throw new Error('release policy must not waive mainnet external review');
   }
   if (policy.approvalMode === 'external_reviewer_signature') {
     if (policy.requiredReviewerSignatures !== 1 || policy.redApprovalArtifact !== null) {
@@ -442,7 +444,7 @@ export function validateReleasePolicy(policy: GalileoReleasePolicy): GalileoRele
     }
   } else if (policy.approvalMode === 'tracked_red_testnet_approval') {
     if (
-      policy.chainId !== GALILEO_CHAIN_ID ||
+      policy.chainId !== GALILEO_TESTNET_CHAIN_ID ||
       policy.requiredReviewerSignatures !== 0 ||
       normalizedReviewers.length !== 0 ||
       policy.redApprovalArtifact !== 'config/galileo.red-testnet-approval.json'

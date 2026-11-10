@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { utils } from 'ethers';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_NETWORK,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
   loadProducts,
 } from './deployment-config';
 import {
@@ -46,8 +47,8 @@ type ProductApprovalReview = {
   };
   contractSource: {
     repository: string;
-    releaseCommit: string;
-    releaseTree: string;
+    releaseCommit: string | null;
+    releaseTree: string | null;
     productsFile: string;
   };
   rustSource: {
@@ -91,6 +92,7 @@ export type ProductReviewResult = {
   staticVectorsReady: boolean;
   scope: 'static_market_size_and_20x_only';
   blockers: string[];
+  pendingInputs: string[];
   backendProtocolBaselineCommit: string;
   storkPolicySha256: string;
   collateralProvenanceSha256: string;
@@ -113,10 +115,11 @@ export type ProductReviewResult = {
   }>;
 };
 
-export const TRACKED_GALILEO_PRODUCT_REVIEW = 'config/galileo.product-approval-review.json';
-export const TRACKED_GALILEO_PRODUCTS = 'config/galileo.products.json';
+export const TRACKED_GALILEO_PRODUCT_REVIEW = PERPDEX_NETWORK.files.productReview;
+export const TRACKED_GALILEO_PRODUCTS = PERPDEX_NETWORK.files.products;
 export const GALILEO_CONTRACT_PACKET_BASE_COMMIT = '8ac5c9f3dfd4c5afc33e940400ead69c719fe043';
 export const GALILEO_CONTRACT_PACKET_BASE_TREE = 'fa7c4782c141c55ab8ecfa51a297bec1c6a4c43f';
+const PENDING_PRODUCT_REVIEW_DECISION = 'pending_red_approval';
 
 function decimalToUnits(value: string, decimals: number, label: string): bigint {
   if (!/^\d+(\.\d+)?$/.test(value)) throw new Error(`${label} must be an unsigned decimal`);
@@ -138,32 +141,43 @@ export function validateProductApprovalReview(
   ) as ProductApprovalReview;
   const products = loadProducts(path.join(repoRoot, TRACKED_GALILEO_PRODUCTS), { requireApproved: false });
   const stork = loadTrackedStorkDeploymentPolicy(repoRoot);
-  const collateral = loadTrackedCollateralProvenance(repoRoot);
+  const collateral = loadTrackedCollateralProvenance(repoRoot, { allowUnresolved: true });
+  const pendingInputs = collateral.unresolved.map((field) => `collateral provenance ${field} is operator-fill`);
   if (
     review.schemaVersion !== 3 ||
-    review.reviewId !== 'bond-perpdex-galileo-product-vectors' ||
-    review.chainId !== GALILEO_CHAIN_ID
+    review.reviewId !== PERPDEX_NETWORK.ids.productReview ||
+    review.chainId !== PERPDEX_CHAIN_ID
   ) {
-    throw new Error('Galileo product approval review identity mismatch');
+    throw new Error(`${PERPDEX_NETWORK.name} product approval review identity mismatch`);
   }
   if (
-    utils.getAddress(review.collateral.address) !== GALILEO_USDCE_ADDRESS ||
+    utils.getAddress(review.collateral.address) !== PERPDEX_COLLATERAL_ADDRESS ||
     review.collateral.productId !== 0 ||
-    review.collateral.symbol !== GALILEO_USDCE_SYMBOL ||
-    review.collateral.decimals !== GALILEO_USDCE_DECIMALS ||
+    review.collateral.symbol !== PERPDEX_COLLATERAL_SYMBOL ||
+    review.collateral.decimals !== PERPDEX_COLLATERAL_DECIMALS ||
     review.collateral.provenanceFile !== TRACKED_COLLATERAL_PROVENANCE ||
     review.collateral.provenanceSha256 !== collateral.provenanceSha256 ||
     review.collateral.selectionMode !== 'static_pinned'
   ) {
-    throw new Error('product approval review does not pin exact static Galileo USDC.e provenance');
+    throw new Error(
+      `product approval review does not pin exact static ${PERPDEX_NETWORK.name} ${PERPDEX_COLLATERAL_SYMBOL} provenance`
+    );
   }
-  requireGitObject(review.contractSource.releaseCommit, 'contract source commit');
-  requireGitObject(review.contractSource.releaseTree, 'contract source tree');
+  const contractPacketBase = PERPDEX_NETWORK.pins.contractPacketBase;
+  if (contractPacketBase === null) {
+    if (review.contractSource.releaseCommit !== null || review.contractSource.releaseTree !== null) {
+      throw new Error('contract packet base is operator-fill; the review must not invent a commit or tree');
+    }
+    pendingInputs.push('contract packet base commit/tree is operator-fill');
+  } else {
+    requireGitObject(review.contractSource.releaseCommit as string, 'contract source commit');
+    requireGitObject(review.contractSource.releaseTree as string, 'contract source tree');
+  }
   requireGitObject(review.rustSource.releaseCommit, 'Rust source commit');
   if (
     review.contractSource.repository !== 'Bond-xyz/vertex-contracts' ||
-    review.contractSource.releaseCommit !== GALILEO_CONTRACT_PACKET_BASE_COMMIT ||
-    review.contractSource.releaseTree !== GALILEO_CONTRACT_PACKET_BASE_TREE ||
+    review.contractSource.releaseCommit !== (contractPacketBase?.commit ?? null) ||
+    review.contractSource.releaseTree !== (contractPacketBase?.tree ?? null) ||
     review.contractSource.productsFile !== TRACKED_GALILEO_PRODUCTS ||
     review.rustSource.repository !== 'Bond-xyz/perpdex-rust-backend' ||
     review.rustSource.releaseCommit !== BACKEND_PROTOCOL_BASELINE_COMMIT ||
@@ -211,7 +225,7 @@ export function validateProductApprovalReview(
     new Set(reviewedProductIds).size !== reviewedProductIds.length ||
     JSON.stringify(reviewedProductIds) !== JSON.stringify(expectedProductIds)
   ) {
-    throw new Error('product review markets must be exactly the tracked Galileo products in order');
+    throw new Error('product review markets must be exactly the tracked launch products in order');
   }
   const reviewByProduct = new Map(review.markets.map((market) => [market.productId, market]));
   const storkByProduct = new Map(stork.policy.feeds.map((feed) => [feed.productId, feed]));
@@ -299,27 +313,35 @@ export function validateProductApprovalReview(
   });
 
   if (JSON.stringify(review.blockers) !== JSON.stringify(blockers)) {
-    throw new Error('stored Galileo product-review blockers do not match the computed static vectors');
+    throw new Error('stored product-review blockers do not match the computed static vectors');
   }
   if (review.approval.approver !== 'Red') {
-    throw new Error('Galileo product-vector approval is restricted to Red');
+    throw new Error('product-vector approval is restricted to Red');
   }
-  if (
+  const pendingApproval =
+    review.approval.approved === false &&
+    review.approval.decision === PENDING_PRODUCT_REVIEW_DECISION &&
+    review.approval.approvedAt === null;
+  if (pendingApproval) {
+    pendingInputs.push('tracked Red static-vector approval is pending');
+  } else if (
     review.approval.approved !== true ||
-    review.approval.decision !== 'approve_galileo_vectors_with_verified_stork_deploy_time_prices' ||
+    review.approval.decision !== PERPDEX_NETWORK.decisions.productReview ||
     !review.approval.approvedAt ||
     !Number.isFinite(Date.parse(review.approval.approvedAt)) ||
     !review.approval.recordedScope.includes('no fixed deploy-time prices')
   ) {
-    throw new Error('static Galileo vectors require Red approval with the Stork deploy-time override');
+    throw new Error('static vectors require Red approval with the Stork deploy-time override');
   }
-  const staticVectorsReady = blockers.length === 0 && review.approval.approved && products.approved;
+  const staticVectorsReady =
+    blockers.length === 0 && pendingInputs.length === 0 && review.approval.approved && products.approved;
   if (options.requireApproved && !staticVectorsReady) {
     throw new Error(
-      `Galileo static market-vector approval is not ready: ${[
+      `${PERPDEX_NETWORK.name} static market-vector approval is not ready: ${[
         ...blockers,
+        ...pendingInputs,
         ...(!review.approval.approved ? ['tracked Red static-vector approval is false'] : []),
-        ...(!products.approved ? ['galileo.products.json static vector approved is false'] : []),
+        ...(!products.approved ? [`${TRACKED_GALILEO_PRODUCTS} static vector approved is false`] : []),
       ].join('; ')}`
     );
   }
@@ -328,6 +350,7 @@ export function validateProductApprovalReview(
     staticVectorsReady,
     scope: 'static_market_size_and_20x_only',
     blockers,
+    pendingInputs,
     backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
     storkPolicySha256: stork.policySha256,
     collateralProvenanceSha256: collateral.provenanceSha256,

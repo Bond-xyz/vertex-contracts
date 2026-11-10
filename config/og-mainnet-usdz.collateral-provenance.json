@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "provenanceId": "bond-og-mainnet-usdz-usdz-product-zero",
+  "chainId": 16661,
+  "collateral": {
+    "address": "0xd4d54bd7379e799417563b1bb42426c9bd4ccb2a",
+    "symbol": "USDZ",
+    "decimals": 6,
+    "productId": 0
+  },
+  "selection": {
+    "mode": "static_pinned",
+    "runtimeRegistryLookup": false,
+    "aliasSubstitutionAllowed": false,
+    "mockOrReplacementDeploymentAllowed": false,
+    "provenanceOnly": true
+  },
+  "normalizedCarriedFieldTupleSha256": null,
+  "sources": {
+    "bondEnvironments": {
+      "repository": "Bond-xyz/bond-shared-registry",
+      "commit": "5efbb08aac4b632e73115f5d9d916a757570aa5d",
+      "tree": "bef57a5d8e6edd23e19545f4458458323f33c255",
+      "file": "envs/og-mainnet-prod/assets.json",
+      "fileBlob": "7fd1b3056d41942d77b437e82ce5253e2cdf2820",
+      "fileSha256": "0159a18380b3b4424739662cb24a645696598fe7fb5583637f99b9901a4630da",
+      "perpdexFile": "envs/og-mainnet-prod/perpdex.json",
+      "perpdexFileSha256": "89f51ffb51b972ad8c2a6c40c2f862c692bdbd0e6568efcd4ba462d42906598d",
+      "assetId": "USDZ",
+      "lendingEnabled": false,
+      "ammEnabled": false,
+      "provisionMode": "existing",
+      "autoDeploy": false
+    },
+    "bondSuperApp": {
+      "repository": "Bond-xyz/bond-super-app",
+      "commit": null,
+      "tree": null,
+      "file": "packages/config/src/generated/registry.ts",
+      "fileBlob": null,
+      "fileSha256": null,
+      "assetId": "USDZ",
+      "registryDomains": null,
+      "perpdexLifecycle": null,
+      "perpdexEnabled": null
+    }
+  }
+}

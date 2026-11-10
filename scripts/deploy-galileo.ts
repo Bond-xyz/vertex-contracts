@@ -4,14 +4,17 @@ import { Manifest, ManifestData } from '@openzeppelin/upgrades-core';
 import { artifacts, ethers, network as hardhatNetwork, upgrades } from 'hardhat';
 import { BigNumber, Contract, ContractReceipt, ContractTransaction, utils, Wallet } from 'ethers';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_RELEASE_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  deploymentStateFile,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_NETWORK,
+  PERPDEX_RELEASE_ID,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
   initialPrices,
-  requireGalileoUsdce,
+  requireProfileCollateral,
   resolveProductsWithStorkPrices,
+  resolveSequencer,
 } from './deployment-config';
 import {
   ArtifactRuntimeEvidence,
@@ -74,7 +77,7 @@ import {
 import { isCanonicalGalileoRuntimeCodeHash } from './galileo-runtime-hash';
 
 const AUDITED_BASE_COMMIT = '6d5df597afe4eb16c6131a85f45322e0954b9e94';
-const EXPECTED_OPENZEPPELIN_MANIFEST = `.openzeppelin/unknown-${GALILEO_CHAIN_ID}.json`;
+const EXPECTED_OPENZEPPELIN_MANIFEST = `.openzeppelin/unknown-${PERPDEX_CHAIN_ID}.json`;
 const reverifyStorkBeforePriceWrite = (preflight: GalileoStorkReleasePreflight): void => {
   const verified = validateStorkDeploymentSnapshot(preflight.snapshot, preflight.policy, preflight.policySha256);
   if (storkSnapshotSha256(verified) !== preflight.snapshotSha256) {
@@ -228,31 +231,29 @@ type PreparedDeployment = Record<string, any>;
 
 function releaseFiles(): ReleaseFiles {
   return {
-    productsFile: path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json'),
+    productsFile: path.resolve(process.env.PERPDEX_PRODUCTS_FILE || PERPDEX_NETWORK.files.products),
     verifierFile: path.resolve(
-      process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
+      process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || PERPDEX_NETWORK.files.verifierPublicKeys
     ),
-    productReviewFile: path.resolve(
-      process.env.PERPDEX_PRODUCT_REVIEW_FILE || './config/galileo.product-approval-review.json'
-    ),
+    productReviewFile: path.resolve(process.env.PERPDEX_PRODUCT_REVIEW_FILE || PERPDEX_NETWORK.files.productReview),
     approvalFile: path.resolve(process.env.PERPDEX_RED_APPROVAL_FILE || TRACKED_RED_GALILEO_APPROVAL),
     deploymentIntentFile: path.resolve(
-      process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
+      process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent
     ),
-    preparedFile: path.resolve(process.env.PERPDEX_PREPARED_DEPLOYMENT || './deployments/16602/prepared.local.json'),
+    preparedFile: path.resolve(process.env.PERPDEX_PREPARED_DEPLOYMENT || deploymentStateFile('prepared')),
     finalizationJournalFile: path.resolve(
-      process.env.PERPDEX_FINALIZATION_JOURNAL || './deployments/16602/finalization.local.json'
+      process.env.PERPDEX_FINALIZATION_JOURNAL || deploymentStateFile('finalization')
     ),
-    manifestFile: path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || './deployments/16602/latest.local.json'),
+    manifestFile: path.resolve(process.env.PERPDEX_DEPLOYMENT_MANIFEST || deploymentStateFile('latest')),
   };
 }
 
 async function checkedQuote(): Promise<string> {
   const network = await ethers.provider.getNetwork();
-  if (network.chainId !== GALILEO_CHAIN_ID) {
-    throw new Error(`refusing deployment: expected chain ${GALILEO_CHAIN_ID}, got ${network.chainId}`);
+  if (network.chainId !== PERPDEX_CHAIN_ID) {
+    throw new Error(`refusing deployment: expected chain ${PERPDEX_CHAIN_ID}, got ${network.chainId}`);
   }
-  const quote = requireGalileoUsdce(process.env.PERPDEX_QUOTE_TOKEN_ADDRESS);
+  const quote = requireProfileCollateral(process.env.PERPDEX_QUOTE_TOKEN_ADDRESS);
   if ((await ethers.provider.getCode(quote)) === '0x') throw new Error('canonical quote token has no bytecode');
   const quoteContract = new Contract(
     quote,
@@ -260,10 +261,12 @@ async function checkedQuote(): Promise<string> {
     ethers.provider
   );
   if (
-    (await quoteContract.decimals()) !== GALILEO_USDCE_DECIMALS ||
-    (await quoteContract.symbol()) !== GALILEO_USDCE_SYMBOL
+    (await quoteContract.decimals()) !== PERPDEX_COLLATERAL_DECIMALS ||
+    (await quoteContract.symbol()) !== PERPDEX_COLLATERAL_SYMBOL
   ) {
-    throw new Error(`Galileo collateral metadata mismatch: expected ${GALILEO_USDCE_SYMBOL}/${GALILEO_USDCE_DECIMALS}`);
+    throw new Error(
+      `${PERPDEX_NETWORK.name} collateral metadata mismatch: expected ${PERPDEX_COLLATERAL_SYMBOL}/${PERPDEX_COLLATERAL_DECIMALS}`
+    );
   }
   return quote;
 }
@@ -291,14 +294,14 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
   const contractDiff = await collectContractInterfaceDiff();
   const releaseStateHostIdentity = ensureLocalReleaseStateHostIdentity();
   const sequencer = requiredAddress(
-    process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address,
+    resolveSequencer(process.env.PERPDEX_SEQUENCER_ADDRESS, deployer.address),
     'PERPDEX_SEQUENCER_ADDRESS'
   );
   const openZeppelinManifest = await Manifest.forNetwork(hardhatNetwork.provider);
   if (openZeppelinManifest.file !== EXPECTED_OPENZEPPELIN_MANIFEST) {
     throw new Error(`Galileo preparation requires exact OpenZeppelin manifest path ${EXPECTED_OPENZEPPELIN_MANIFEST}`);
   }
-  assertFreshOpenZeppelinManifestAbsent(path.resolve(__dirname, '..'), GALILEO_CHAIN_ID, openZeppelinManifest.file);
+  assertFreshOpenZeppelinManifestAbsent(path.resolve(__dirname, '..'), PERPDEX_CHAIN_ID, openZeppelinManifest.file);
   const latestBlock = await ethers.provider.getBlock('latest');
   if (!latestBlock) throw new Error('latest Galileo block is unavailable');
   assertDeploymentIntentAvailableForFirstTransaction(preflight.deploymentIntent, {
@@ -488,7 +491,7 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
   const prepared = {
     schemaVersion: 1,
     phase: 'prepared_no_price_writes',
-    release: GALILEO_RELEASE_ID,
+    release: PERPDEX_RELEASE_ID,
     deploymentIntent: postflight.deploymentIntent,
     source: {
       reviewedReleaseCommit: postflight.source.releaseCommit,
@@ -508,7 +511,7 @@ async function prepareDeployment(files: ReleaseFiles, deployer: Wallet): Promise
       manifestFile: finalOpenZeppelinManifest.file,
       manifestSha256: sha256File(openZeppelinManifestPath),
     },
-    network: { name: '0G Galileo Testnet', chainId: GALILEO_CHAIN_ID },
+    network: { name: PERPDEX_NETWORK.displayName, chainId: PERPDEX_CHAIN_ID },
     deployer: deployer.address,
     sequencer,
     finalizationBoundary: {
@@ -595,9 +598,9 @@ function assertPreparedBinding(prepared: PreparedDeployment, preflight: Verified
   if (
     prepared.schemaVersion !== 1 ||
     prepared.phase !== 'prepared_no_price_writes' ||
-    prepared.release !== GALILEO_RELEASE_ID ||
-    prepared.network?.chainId !== GALILEO_CHAIN_ID ||
-    prepared.quoteToken !== GALILEO_USDCE_ADDRESS ||
+    prepared.release !== PERPDEX_RELEASE_ID ||
+    prepared.network?.chainId !== PERPDEX_CHAIN_ID ||
+    prepared.quoteToken !== PERPDEX_COLLATERAL_ADDRESS ||
     utils.getAddress(prepared.deployer || ethers.constants.AddressZero) !==
       utils.getAddress(preflight.deploymentIntent.deployer) ||
     utils.getAddress(prepared.sequencer || ethers.constants.AddressZero) !==
@@ -642,8 +645,10 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
   const quote = await checkedQuote();
   if (
     deployer.address !== prepared.deployer ||
-    requiredAddress(process.env.PERPDEX_SEQUENCER_ADDRESS || deployer.address, 'PERPDEX_SEQUENCER_ADDRESS') !==
-      prepared.sequencer
+    requiredAddress(
+      resolveSequencer(process.env.PERPDEX_SEQUENCER_ADDRESS, deployer.address),
+      'PERPDEX_SEQUENCER_ADDRESS'
+    ) !== prepared.sequencer
   ) {
     throw new Error('finalize signer/sequencer does not match the prepared graph');
   }
@@ -887,8 +892,8 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
     manifestFile: files.manifestFile,
     expected: {
       schemaVersion: 1,
-      release: GALILEO_RELEASE_ID,
-      chainId: GALILEO_CHAIN_ID,
+      release: PERPDEX_RELEASE_ID,
+      chainId: PERPDEX_CHAIN_ID,
       preparedFileSha256: sha256File(files.preparedFile),
       snapshotSha256: storkPreflight.snapshotSha256,
       manifestReference: portableArtifactReference(files.finalizationJournalFile, files.manifestFile),
@@ -976,7 +981,7 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
       assertSameVerifiedRedTestnetReleaseEvidence(preflight, postflight);
       const manifest = {
         schemaVersion: 9,
-        release: GALILEO_RELEASE_ID,
+        release: PERPDEX_RELEASE_ID,
         deploymentIntent: postflight.deploymentIntent,
         preparation: {
           schemaVersion: prepared.schemaVersion,
@@ -1054,9 +1059,9 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
         },
         quoteToken: quote,
         collateral: {
-          address: GALILEO_USDCE_ADDRESS,
-          symbol: GALILEO_USDCE_SYMBOL,
-          decimals: GALILEO_USDCE_DECIMALS,
+          address: PERPDEX_COLLATERAL_ADDRESS,
+          symbol: PERPDEX_COLLATERAL_SYMBOL,
+          decimals: PERPDEX_COLLATERAL_DECIMALS,
           productId: 0,
           source: 'existing',
           deployToken: false,
@@ -1110,11 +1115,11 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
         },
         withdrawalContract: {
           collateralProductId: 0,
-          token: GALILEO_USDCE_ADDRESS,
-          tokenDecimals: GALILEO_USDCE_DECIMALS,
-          directRequestedAmountUnits: 'USDC.e base units',
+          token: PERPDEX_COLLATERAL_ADDRESS,
+          tokenDecimals: PERPDEX_COLLATERAL_DECIMALS,
+          directRequestedAmountUnits: `${PERPDEX_COLLATERAL_SYMBOL} base units`,
           directLedgerFeeX18: '1000000000000000000',
-          slowRequestedAmountUnits: 'USDC.e base units',
+          slowRequestedAmountUnits: `${PERPDEX_COLLATERAL_SYMBOL} base units`,
           slowWalletQueueFeeUnits: '1000000',
           slowTimeoutSeconds: 259200,
           successEvent: 'WithdrawalSettled(bytes32,uint32,address,address,uint128,int128)',
@@ -1123,7 +1128,7 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
           localTimeTravelIsLive72HourEvidence: false,
         },
         explorerVerification: {
-          explorer: 'https://chainscan-galileo.0g.ai',
+          explorer: PERPDEX_NETWORK.explorer,
           status: 'pending_after_deployment',
           requiredBeforeRelease: true,
           verifyProxyImplementationAndAdmin: true,
@@ -1151,7 +1156,7 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
           deterministicApplicationSolc013Reproduction: true,
           exactVerifierSignerCountAndBitmask: true,
           exactLiveMarketConfiguration: true,
-          exactGalileoUsdcePinned: quote === GALILEO_USDCE_ADDRESS,
+          exactGalileoUsdcePinned: quote === PERPDEX_COLLATERAL_ADDRESS,
           staticCollateralProvenanceBound: true,
           twoPhasePrepareFinalize: true,
           staticApprovalBeforeFirstPreparationTransaction: true,
@@ -1184,11 +1189,19 @@ async function finalizeDeployment(files: ReleaseFiles, deployer: Wallet): Promis
 }
 
 async function main(): Promise<void> {
+  // Mainnet profiles have a custody-held (Fordefi) deployer and external-review
+  // approval; this local-EOA, Red-approved script refuses them before any RPC call.
+  const deployerKeyEnv = PERPDEX_NETWORK.deployerPrivateKeyEnv;
+  if (deployerKeyEnv === null || PERPDEX_NETWORK.approvalMode !== 'tracked_red_testnet_approval') {
+    throw new Error(
+      `refusing ${PERPDEX_NETWORK.name} deployment: this script signs with a local EOA under tracked Red testnet approval only`
+    );
+  }
   const phase = process.env.PERPDEX_DEPLOY_PHASE;
   const files = releaseFiles();
   const configuredGasPriceWei = resolveGalileoLegacyGasPrice();
-  const privateKey = process.env.PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY;
-  if (!privateKey) throw new Error('PERPDEX_GALILEO_DEPLOYER_PRIVATE_KEY is required');
+  const privateKey = process.env[deployerKeyEnv];
+  if (!privateKey) throw new Error(`${deployerKeyEnv} is required`);
   const deployer = new GalileoLegacyFeeWallet(privateKey, ethers.provider, configuredGasPriceWei);
   const populatedTransaction = await deployer.populateTransaction({
     to: deployer.address,

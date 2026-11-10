@@ -21,12 +21,13 @@ import {
   sha256File,
 } from './release-evidence';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_PROJECT_ID,
-  GALILEO_RELEASE_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_NETWORK,
+  PERPDEX_PROJECT_ID,
+  PERPDEX_RELEASE_ID,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
   GalileoProducts,
   loadProducts,
   loadVerifierConfig,
@@ -179,6 +180,14 @@ function validateAgentReviews(reviews: IndependentAgentReviewEvidence[], release
   }
 }
 
+function assertRedTestnetProfile(): void {
+  if (PERPDEX_NETWORK.approvalMode !== 'tracked_red_testnet_approval' || PERPDEX_NETWORK.files.redApproval === null) {
+    throw new Error(
+      `${PERPDEX_NETWORK.name} requires external reviewer approval; the tracked Red testnet approval path is Galileo-only`
+    );
+  }
+}
+
 function validatePolicyForRedApproval(policy: GalileoReleasePolicy): void {
   if (
     policy.approvalMode !== 'tracked_red_testnet_approval' ||
@@ -237,13 +246,13 @@ function validateApprovalIdentity(approval: RedTestnetApproval): void {
     approval.schemaVersion !== RED_TESTNET_APPROVAL_SCHEMA_VERSION ||
     approval.approvalId !== 'bond-perpdex-galileo-red-testnet-release' ||
     approval.scope !== 'galileo_testnet_only' ||
-    approval.projectId !== GALILEO_PROJECT_ID ||
-    approval.releaseId !== GALILEO_RELEASE_ID ||
-    approval.chainId !== GALILEO_CHAIN_ID ||
-    utils.getAddress(approval.collateral.address) !== GALILEO_USDCE_ADDRESS ||
+    approval.projectId !== PERPDEX_PROJECT_ID ||
+    approval.releaseId !== PERPDEX_RELEASE_ID ||
+    approval.chainId !== PERPDEX_CHAIN_ID ||
+    utils.getAddress(approval.collateral.address) !== PERPDEX_COLLATERAL_ADDRESS ||
     approval.collateral.productId !== 0 ||
-    approval.collateral.symbol !== GALILEO_USDCE_SYMBOL ||
-    approval.collateral.decimals !== GALILEO_USDCE_DECIMALS ||
+    approval.collateral.symbol !== PERPDEX_COLLATERAL_SYMBOL ||
+    approval.collateral.decimals !== PERPDEX_COLLATERAL_DECIMALS ||
     approval.approver.name !== 'Red' ||
     approval.approver.role !== 'product_and_release_owner' ||
     approval.mainnetExternalReviewWaived !== false
@@ -262,6 +271,7 @@ export async function createRedTestnetApprovalDraft(input: {
   independentAgentReviews: IndependentAgentReviewEvidence[];
   repoRoot?: string;
 }): Promise<RedTestnetApproval> {
+  assertRedTestnetProfile();
   const repoRoot = input.repoRoot || repositoryRoot();
   const productsFile = requireTrackedReleaseFile(repoRoot, input.productsFile, TRACKED_GALILEO_PRODUCTS, 'products');
   const productReviewFile = requireTrackedReleaseFile(
@@ -300,14 +310,14 @@ export async function createRedTestnetApprovalDraft(input: {
     schemaVersion: RED_TESTNET_APPROVAL_SCHEMA_VERSION,
     approvalId: 'bond-perpdex-galileo-red-testnet-release',
     scope: 'galileo_testnet_only',
-    projectId: GALILEO_PROJECT_ID,
-    releaseId: GALILEO_RELEASE_ID,
-    chainId: GALILEO_CHAIN_ID,
+    projectId: PERPDEX_PROJECT_ID,
+    releaseId: PERPDEX_RELEASE_ID,
+    chainId: PERPDEX_CHAIN_ID,
     collateral: {
-      address: GALILEO_USDCE_ADDRESS,
+      address: PERPDEX_COLLATERAL_ADDRESS,
       productId: 0,
-      symbol: GALILEO_USDCE_SYMBOL,
-      decimals: GALILEO_USDCE_DECIMALS,
+      symbol: PERPDEX_COLLATERAL_SYMBOL,
+      decimals: PERPDEX_COLLATERAL_DECIMALS,
     },
     approver: { name: 'Red', role: 'product_and_release_owner' },
     decision: 'pending_red_approval',
@@ -347,6 +357,7 @@ export async function collectAndVerifyRedTestnetReleaseEvidence(input: {
   approvalFile?: string;
   repoRoot?: string;
 }): Promise<VerifiedRedTestnetReleaseEvidence> {
+  assertRedTestnetProfile();
   const repoRoot = input.repoRoot || repositoryRoot();
   const productsFile = requireTrackedReleaseFile(repoRoot, input.productsFile, TRACKED_GALILEO_PRODUCTS, 'products');
   const productReviewFile = requireTrackedReleaseFile(

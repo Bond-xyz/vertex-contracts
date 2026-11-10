@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { PERPDEX_CHAIN_ID } from './deployment-config';
 import {
   assertNoStorkSecretMaterial,
   createStorkDeploymentSnapshotFromRaw,
@@ -25,7 +26,9 @@ function main(): void {
     timestamp: number;
     capturedAtNs: string;
   };
-  if (observation.chainId !== 16602) throw new Error('Stork observation block must target Galileo chain 16602');
+  if (observation.chainId !== PERPDEX_CHAIN_ID) {
+    throw new Error(`Stork observation block must target selected chain ${PERPDEX_CHAIN_ID}`);
+  }
   const { policy, policySha256 } = loadTrackedStorkDeploymentPolicy();
   const snapshot = createStorkDeploymentSnapshotFromRaw({
     rawResponseText,

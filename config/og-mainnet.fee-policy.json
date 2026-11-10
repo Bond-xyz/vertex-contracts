@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "policyId": "bond-perpdex-og-mainnet-legacy-fees",
+  "status": "pending_og_mainnet_review",
+  "chainId": 16661,
+  "transactionType": "legacy",
+  "requiredEnvironmentVariable": "PERPDEX_OG_MAINNET_GAS_PRICE_WEI",
+  "requireExplicitValue": true,
+  "minimumGasPriceWei": null,
+  "defaultGasPriceWei": null,
+  "maximumGasPriceWei": null
+}

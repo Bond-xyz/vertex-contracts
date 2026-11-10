@@ -3,23 +3,25 @@ import fs from 'fs';
 import path from 'path';
 import { BigNumber, utils } from 'ethers';
 import {
-  GALILEO_CHAIN_ID,
-  GALILEO_USDCE_ADDRESS,
-  GALILEO_USDCE_DECIMALS,
-  GALILEO_USDCE_SYMBOL,
+  PERPDEX_CHAIN_ID,
+  PERPDEX_COLLATERAL_ADDRESS,
+  PERPDEX_COLLATERAL_DECIMALS,
+  PERPDEX_COLLATERAL_SYMBOL,
+  PERPDEX_NETWORK,
+  PerpdexNetworkProfile,
 } from './deployment-config';
 
 export const BACKEND_PROTOCOL_BASELINE_COMMIT = '1d174da2f130cf6f4f03b29029a002d92acc76f8';
 // Retained only for the existing release-attestation field name. This value is
 // a reviewed protocol baseline, never the final runtime artifact source.
 export const BACKEND_BETA_COMMIT = BACKEND_PROTOCOL_BASELINE_COMMIT;
-export const TRACKED_STORK_DEPLOYMENT_POLICY = 'config/galileo.stork-deployment-policy.json';
-export const TRACKED_COLLATERAL_PROVENANCE = 'config/galileo.collateral-provenance.json';
-export const DEFAULT_STORK_DEPLOYMENT_SNAPSHOT = 'config/galileo.stork-deployment-snapshot.local.json';
+export const TRACKED_STORK_DEPLOYMENT_POLICY = PERPDEX_NETWORK.files.storkPolicy;
+export const TRACKED_COLLATERAL_PROVENANCE = PERPDEX_NETWORK.files.collateralProvenance;
+export const DEFAULT_STORK_DEPLOYMENT_SNAPSHOT = PERPDEX_NETWORK.files.storkSnapshot;
 export const BLOCKED_STORK_DEPLOYMENT_POLICY_STATUS = 'blocked_pending_reviewed_cross_feed_timestamp_spread';
 export const BLOCKED_STORK_COHERENCE_DECISION = 'pending_explicit_red_policy_input';
-export const APPROVED_STORK_DEPLOYMENT_POLICY_STATUS = 'approved_for_galileo_testnet_release';
-export const APPROVED_STORK_COHERENCE_DECISION = 'approve_exact_galileo_testnet_cross_feed_timestamp_spread';
+export const APPROVED_STORK_DEPLOYMENT_POLICY_STATUS = PERPDEX_NETWORK.activeReleaseStatus;
+export const APPROVED_STORK_COHERENCE_DECISION = PERPDEX_NETWORK.decisions.storkCoherence;
 
 const STORK_AGGREGATOR = '0x0a803F9b1CCe32e2773e0d2e98b37E0775cA5d44';
 const STORK_CHECKSUM = '9be7e9f9ed459417d96112a7467bd0b27575a2c7847195c68f805b70ce1795ba';
@@ -193,8 +195,8 @@ function requireBytes32(value: string, label: string): string {
 export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): StorkDeploymentPolicy {
   if (
     policy.schemaVersion !== 1 ||
-    policy.policyId !== 'bond-perpdex-galileo-stork-deployment-prices' ||
-    policy.chainId !== GALILEO_CHAIN_ID ||
+    policy.policyId !== PERPDEX_NETWORK.ids.storkPolicy ||
+    policy.chainId !== PERPDEX_CHAIN_ID ||
     policy.backend.repository !== 'Bond-xyz/perpdex-rust-backend' ||
     policy.backend.releaseCommit !== BACKEND_BETA_COMMIT ||
     policy.backend.releaseCommitRole !== 'reviewed_protocol_baseline_only' ||
@@ -247,11 +249,12 @@ export function validateStorkDeploymentPolicy(policy: StorkDeploymentPolicy): St
   ) {
     throw new Error('Stork deployment snapshot policy must require untracked exact signed evidence');
   }
+  const [btc, eth, sol, zeroG] = PERPDEX_NETWORK.marketSymbols;
   const expected = [
-    ['BTC/USD', 'BTCUSDCPERP', 2, 'BTCUSD'],
-    ['ETH/USD', 'ETHUSDCPERP', 4, 'ETHUSD'],
-    ['SOL/USD', 'SOLUSDCPERP', 6, 'SOLUSD'],
-    ['0G/USD', '0GUSDCPERP', 8, '0GUSD'],
+    ['BTC/USD', btc, 2, 'BTCUSD'],
+    ['ETH/USD', eth, 4, 'ETHUSD'],
+    ['SOL/USD', sol, 6, 'SOLUSD'],
+    ['0G/USD', zeroG, 8, '0GUSD'],
   ];
   const actual = policy.feeds.map((feed) => [feed.pair, feed.symbol, feed.productId, feed.feedId]);
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -297,22 +300,42 @@ export function loadTrackedStorkDeploymentPolicy(repoRoot = path.resolve(__dirna
   return { policy, policyFile, policySha256: sha256File(policyFile) };
 }
 
-export function loadTrackedCollateralProvenance(repoRoot = path.resolve(__dirname, '..')): {
+function unresolvedPins(value: unknown, prefix: string): string[] {
+  if (value === null) return [prefix];
+  if (typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+    unresolvedPins(child, `${prefix}.${key}`)
+  );
+}
+
+// Operator-fill fields are tracked as null in both the profile pins and the
+// provenance file; any remaining null keeps every release gate closed.
+export function unresolvedCollateralProvenancePins(profile: PerpdexNetworkProfile = PERPDEX_NETWORK): string[] {
+  return [
+    ...unresolvedPins(profile.pins.normalizedCarriedFieldTupleSha256, 'normalizedCarriedFieldTupleSha256'),
+    ...unresolvedPins(profile.pins.collateralProvenanceSources, 'sources'),
+  ];
+}
+
+export function loadTrackedCollateralProvenance(
+  repoRoot = path.resolve(__dirname, '..'),
+  options: { allowUnresolved?: boolean } = {}
+): {
   provenance: CollateralProvenance;
   provenanceFile: string;
   provenanceSha256: string;
+  unresolved: string[];
 } {
   const provenanceFile = path.resolve(repoRoot, TRACKED_COLLATERAL_PROVENANCE);
   const provenance = readJson<CollateralProvenance>(provenanceFile);
-  const env = provenance.sources.bondEnvironments;
-  const app = provenance.sources.bondSuperApp;
+  const pins = PERPDEX_NETWORK.pins;
   if (
     provenance.schemaVersion !== 1 ||
-    provenance.provenanceId !== 'bond-galileo-usdce-product-zero' ||
-    provenance.chainId !== GALILEO_CHAIN_ID ||
-    utils.getAddress(provenance.collateral.address) !== GALILEO_USDCE_ADDRESS ||
-    provenance.collateral.symbol !== GALILEO_USDCE_SYMBOL ||
-    provenance.collateral.decimals !== GALILEO_USDCE_DECIMALS ||
+    provenance.provenanceId !== PERPDEX_NETWORK.ids.collateralProvenance ||
+    provenance.chainId !== PERPDEX_CHAIN_ID ||
+    utils.getAddress(provenance.collateral.address) !== PERPDEX_COLLATERAL_ADDRESS ||
+    provenance.collateral.symbol !== PERPDEX_COLLATERAL_SYMBOL ||
+    provenance.collateral.decimals !== PERPDEX_COLLATERAL_DECIMALS ||
     provenance.collateral.productId !== 0 ||
     provenance.selection.mode !== 'static_pinned' ||
     provenance.selection.runtimeRegistryLookup !== false ||
@@ -320,47 +343,27 @@ export function loadTrackedCollateralProvenance(repoRoot = path.resolve(__dirnam
     provenance.selection.mockOrReplacementDeploymentAllowed !== false ||
     provenance.selection.provenanceOnly !== true
   ) {
-    throw new Error('collateral provenance must statically pin exact Galileo USDC.e product 0');
+    throw new Error(
+      `collateral provenance must statically pin exact ${PERPDEX_NETWORK.name} ${PERPDEX_COLLATERAL_SYMBOL} product 0`
+    );
   }
-  if (
-    provenance.normalizedCarriedFieldTupleSha256 !== 'b385d558b2000cf9cba3db74746e855fddc546464e7c172b338b662823719f7a'
-  ) {
+  if (provenance.normalizedCarriedFieldTupleSha256 !== pins.normalizedCarriedFieldTupleSha256) {
     throw new Error('normalized collateral carried-field tuple binding mismatch');
   }
   if (
-    env.repository !== 'Bond-xyz/bond-environments' ||
-    env.commit !== 'a54d8d3723beced7fc5838a83a63b4fb9070641d' ||
-    env.tree !== 'b62d8dc7e029138073ff44b57a3f25e7d41b6013' ||
-    env.file !== 'envs/og-testnet-staging/assets.json' ||
-    env.fileBlob !== '82434072f7ef8a0687bcd352ac5fb7abe17e8171' ||
-    env.fileSha256 !== 'e5deda5e8514919dfb8aa8da0266d7e37c453d23aec95316d28947e804ea08b6' ||
-    env.perpdexFile !== 'envs/og-testnet-staging/perpdex.json' ||
-    env.perpdexFileSha256 !== '61e152e8082c590ec8cf7f5778cd8903ff4842ea98235e94d5463b6d5184db53' ||
-    env.assetId !== 'USDCE' ||
-    env.lendingEnabled !== true ||
-    env.ammEnabled !== true ||
-    env.provisionMode !== 'existing' ||
-    env.autoDeploy !== false
+    canonicalJson(provenance.sources.bondEnvironments) !==
+    canonicalJson(pins.collateralProvenanceSources.bondEnvironments)
   ) {
     throw new Error('bond-environments collateral provenance mismatch');
   }
-  if (
-    app.repository !== 'Bond-xyz/bond-super-app' ||
-    app.commit !== '65ad0d7ac03423d700c16b17f63f793ec9a2aeab' ||
-    app.tree !== '53fd5289392b88269496664c5ee765547313179a' ||
-    app.file !== 'packages/config/src/generated/registry.ts' ||
-    app.fileBlob !== 'a1d23eeb3c7e55d48656262616210fe395f500a3' ||
-    app.fileSha256 !== '9f4653bdee06f1a6789b6ccda91df6e177ea4acbf26eaf7c3bc3dd718d49084a' ||
-    app.assetId !== 'USDCE' ||
-    app.registryDomains.lending !== true ||
-    app.registryDomains.amm !== true ||
-    app.registryDomains.perpdex !== false ||
-    app.perpdexLifecycle !== 'pending_fresh_deploy' ||
-    app.perpdexEnabled !== false
-  ) {
+  if (canonicalJson(provenance.sources.bondSuperApp) !== canonicalJson(pins.collateralProvenanceSources.bondSuperApp)) {
     throw new Error('Bond Super App collateral provenance mismatch');
   }
-  return { provenance, provenanceFile, provenanceSha256: sha256File(provenanceFile) };
+  const unresolved = unresolvedCollateralProvenancePins();
+  if (unresolved.length > 0 && options.allowUnresolved !== true) {
+    throw new Error(`collateral provenance has unresolved operator-fill fields: ${unresolved.join(', ')}`);
+  }
+  return { provenance, provenanceFile, provenanceSha256: sha256File(provenanceFile), unresolved };
 }
 
 export function verifyStorkSignedFeed(
@@ -443,7 +446,7 @@ export function validateStorkDeploymentSnapshot(
   }
   if (
     snapshot.schemaVersion !== policy.snapshot.schemaVersion ||
-    snapshot.chainId !== GALILEO_CHAIN_ID ||
+    snapshot.chainId !== PERPDEX_CHAIN_ID ||
     snapshot.backendProtocolBaselineCommit !== BACKEND_PROTOCOL_BASELINE_COMMIT ||
     requireSha256(snapshot.policySha256, 'snapshot policy SHA-256') !== requireSha256(policySha256, 'policy SHA-256')
   ) {
@@ -700,7 +703,7 @@ export function createStorkDeploymentSnapshotFromRaw(input: {
   });
   return {
     schemaVersion: 1,
-    chainId: GALILEO_CHAIN_ID,
+    chainId: PERPDEX_CHAIN_ID,
     backendProtocolBaselineCommit: BACKEND_PROTOCOL_BASELINE_COMMIT,
     policySha256: requireSha256(input.policySha256, 'policy SHA-256'),
     capturedAtNs: requireDecimalInteger(input.capturedAtNs, 'capture timestamp').toString(),

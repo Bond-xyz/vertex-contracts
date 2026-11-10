@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { artifacts } from 'hardhat';
+import { PERPDEX_NETWORK } from './deployment-config';
 import {
   createRedTestnetApprovalDraft,
   DeterministicCiEvidence,
@@ -27,15 +28,13 @@ async function main() {
   ) as IndependentAgentReviewEvidence[];
   const approval = await createRedTestnetApprovalDraft({
     artifacts,
-    productsFile: path.resolve(process.env.PERPDEX_PRODUCTS_FILE || './config/galileo.products.json'),
-    productReviewFile: path.resolve(
-      process.env.PERPDEX_PRODUCT_REVIEW_FILE || './config/galileo.product-approval-review.json'
-    ),
+    productsFile: path.resolve(process.env.PERPDEX_PRODUCTS_FILE || PERPDEX_NETWORK.files.products),
+    productReviewFile: path.resolve(process.env.PERPDEX_PRODUCT_REVIEW_FILE || PERPDEX_NETWORK.files.productReview),
     verifierFile: path.resolve(
-      process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || './config/galileo.verifier-public-keys.local.json'
+      process.env.PERPDEX_VERIFIER_PUBLIC_KEYS_FILE || PERPDEX_NETWORK.files.verifierPublicKeys
     ),
     deploymentIntentFile: path.resolve(
-      process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || './config/galileo.deployment-intent.local.json'
+      process.env.PERPDEX_DEPLOYMENT_INTENT_FILE || PERPDEX_NETWORK.files.deploymentIntent
     ),
     deterministicCi,
     independentAgentReviews,

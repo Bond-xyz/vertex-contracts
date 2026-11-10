@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "provenanceId": "bond-og-mainnet-usdce-product-zero",
+  "chainId": 16661,
+  "collateral": {
+    "address": "0x1f3aa82227281ca364bfb3d253b0f1af1da6473e",
+    "symbol": "USDC.e",
+    "decimals": 6,
+    "productId": 0
+  },
+  "selection": {
+    "mode": "static_pinned",
+    "runtimeRegistryLookup": false,
+    "aliasSubstitutionAllowed": false,
+    "mockOrReplacementDeploymentAllowed": false,
+    "provenanceOnly": true
+  },
+  "normalizedCarriedFieldTupleSha256": null,
+  "sources": {
+    "bondEnvironments": {
+      "repository": "Bond-xyz/bond-shared-registry",
+      "commit": "5efbb08aac4b632e73115f5d9d916a757570aa5d",
+      "tree": "bef57a5d8e6edd23e19545f4458458323f33c255",
+      "file": "envs/og-mainnet-prod/assets.json",
+      "fileBlob": "7fd1b3056d41942d77b437e82ce5253e2cdf2820",
+      "fileSha256": "0159a18380b3b4424739662cb24a645696598fe7fb5583637f99b9901a4630da",
+      "perpdexFile": "envs/og-mainnet-prod/perpdex.json",
+      "perpdexFileSha256": "89f51ffb51b972ad8c2a6c40c2f862c692bdbd0e6568efcd4ba462d42906598d",
+      "assetId": "USDCE",
+      "lendingEnabled": true,
+      "ammEnabled": true,
+      "provisionMode": "existing",
+      "autoDeploy": false
+    },
+    "bondSuperApp": {
+      "repository": "Bond-xyz/bond-super-app",
+      "commit": "1222b4710b2a4a15f1af2bd70a181a220212d287",
+      "tree": "2ea4f4ab4e2ba7a6aabd71d69e8f8972ebc6a13d",
+      "file": "packages/config/src/generated/registry.ts",
+      "fileBlob": "4624cd8c4904b2994a3e02464342f4aaeb6851de",
+      "fileSha256": "281ad15c6437e5cc3a6de1fe548ee929e9ea9eb09f389d845fb398d087994d29",
+      "assetId": "USDCE",
+      "registryDomains": {
+        "lending": true,
+        "amm": true,
+        "perpdex": false
+      },
+      "perpdexLifecycle": "pending_fresh_deploy",
+      "perpdexEnabled": false
+    }
+  }
+}
