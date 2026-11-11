@@ -677,6 +677,26 @@ function assertSequencerLaneBindings(profile: PerpdexNetworkProfile, lanes: read
     configs.set(lane.runtimeConfigPath, lane.deployment);
     configBytes.set(runtime.blob, lane.deployment);
 
+    // Lane binding (deployment, env, DATABASE_URL): its own listed file in the lane dir.
+    const binding =
+      (safeRepoPath(lane.laneBindingPath) &&
+        lane.laneBindingPath !== lane.runtimeConfigPath &&
+        lane.files.find((file) => file.path === lane.laneBindingPath)) ||
+      mismatch('lane binding is not one of its reviewed files');
+    if (
+      lane.laneBindingPath.split('/').slice(0, -1).join('/') !==
+      lane.runtimeConfigPath.split('/').slice(0, -1).join('/')
+    ) {
+      mismatch(`lane binding ${lane.laneBindingPath} is not beside its runtime config`);
+    }
+    if (configs.has(lane.laneBindingPath) || configBytes.has(binding.blob)) {
+      mismatch(
+        `lane binding is shared with lane ${configs.get(lane.laneBindingPath) ?? configBytes.get(binding.blob)}`
+      );
+    }
+    configs.set(lane.laneBindingPath, lane.deployment);
+    configBytes.set(binding.blob, lane.deployment);
+
     // Workload environment: production, this lane's own quote domain.
     const env = lane.environment;
     if (env === null || typeof env !== 'object') mismatch('workload environment is missing');

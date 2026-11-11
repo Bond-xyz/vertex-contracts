@@ -12,6 +12,7 @@ import {
   PerpdexNetworkProfile,
   resolveNetworkProfile,
   SEQUENCER_TRADING_IMAGE_FLOOR_COMMIT,
+  SequencerLaneEvidence,
 } from './deployment-config';
 
 export const QUOTE_DOMAIN_REGISTRY_PATH = 'core/types/quote-domains.toml';
@@ -86,6 +87,42 @@ export function quoteDomainAdmitted(checkout: string, commit: string, domain: st
   return null;
 }
 
+export const LANE_BINDING_SCHEMA = 'bond-perpdex/fresh-mainnet-lane-binding/v2';
+
+// Replays a lane-binding.json (bond-perpdex fresh-mainnet-lane-binding/v2) against the
+// lane's evidence. Returns refusals; empty means the binding names exactly this lane.
+export function laneBindingRefusals(bindingJson: string, lane: SequencerLaneEvidence): string[] {
+  let binding: Record<string, unknown> | null;
+  try {
+    binding = JSON.parse(bindingJson);
+  } catch {
+    return ['lane binding is not JSON'];
+  }
+  const refusals: string[] = [];
+  const expect = (what: string, actual: unknown, wanted: unknown) => {
+    if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
+      refusals.push(`${what} ${JSON.stringify(actual)} != ${JSON.stringify(wanted)}`);
+    }
+  };
+  expect('schema', binding?.schema, LANE_BINDING_SCHEMA);
+  expect('deployment', binding?.deployment, lane.deployment);
+  expect('runtimeConfig', binding?.runtimeConfig, lane.runtimeConfigPath);
+  expect('environment', binding?.environment, lane.environment);
+  const env = lane.environment;
+  expect('workloadEnv', binding?.workloadEnv, {
+    BOND_PERPS_ENV: env.bondPerpsEnv,
+    PERPDEX_QUOTE_DOMAIN: env.quoteDomain,
+    PERPDEX_SEPARATE_QUOTE_BOOKS_ENABLED: String(env.separateQuoteBooksEnabled),
+    DATABASE_URL: env.database?.url,
+  });
+  // The binding may leave the image to the release evidence (null), never name another.
+  const image = binding?.tradingImage;
+  if (image !== null && image !== undefined && JSON.stringify(image).indexOf(String(lane.tradingArtifact.digest)) < 0) {
+    refusals.push(`tradingImage ${JSON.stringify(image)} does not name ${lane.tradingArtifact.digest}`);
+  }
+  return refusals;
+}
+
 export function verifySequencerLaneEvidence(
   profile: PerpdexNetworkProfile,
   checkout: string,
@@ -116,6 +153,15 @@ export function verifySequencerLaneEvidence(
         `blob ${blob ?? 'missing'} sha256 ${sha256 ?? 'missing'}`
       );
     }
+    const bindingBytes = tryGit(checkout, ['show', `${evidence.commit}:${lane.laneBindingPath}`]);
+    const bindingRefusals =
+      bindingBytes === null ? ['missing at config commit'] : laneBindingRefusals(bindingBytes.toString(), lane);
+    add(
+      lane.deployment,
+      `lane binding ${lane.laneBindingPath}`,
+      bindingRefusals.length === 0,
+      bindingRefusals.join('; ') || 'deployment, environment, workload env and runtime config match'
+    );
     const artifact = lane.tradingArtifact;
     let source = artifact.sourceCommit;
     if (source === null) {

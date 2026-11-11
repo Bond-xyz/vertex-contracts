@@ -17,6 +17,8 @@ import { assertSequencerLeverageEvidence } from '../scripts/stork-deployment-sna
 import {
   parseQuoteDomainEnvironments,
   parseSeparateBooksEnvironments,
+  LANE_BINDING_SCHEMA,
+  laneBindingRefusals,
   verifySequencerLaneEvidence,
 } from '../scripts/verify-sequencer-lane-evidence';
 import { RESOLVED_LANES, SequencerEvidence, withLane, withSequencerEvidence } from './helpers/sequencer-lanes';
@@ -27,15 +29,15 @@ const LANE_DIR = 'deploy/candidates/production/fresh-mainnet-launch';
 const gate = (profile: PerpdexNetworkProfile) => () => assertSequencerLeverageEvidence(profile);
 
 describe('og-mainnet sequencer lane evidence', () => {
-  it('pins both lanes to bond-perpdex #2973 at 90c79ef4 with exact blob and SHA-256', () => {
+  it('pins both lanes to bond-perpdex f1604545 (#2973 configs, #2977 bindings) with exact blob and SHA-256', () => {
     for (const profile of [mainnet, usdz]) {
       expect(profile.sequencerLeverageEvidence.required).to.equal(true);
       expect(profile.sequencerLeverageEvidence.evidence).to.equal(OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE);
     }
     const evidence = OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE;
     expect(evidence.repository).to.equal('Bond-xyz/bond-perpdex');
-    expect(evidence.commit).to.equal('90c79ef49455d93ebdbee2cc506c7f016f3b1d7d');
-    expect(evidence.tree).to.equal('0b9c5337fb38b15fb008b9b250b8d3ec637fc374');
+    expect(evidence.commit).to.equal('f16045451a96ad3ac77299903fdde200b2ac0044');
+    expect(evidence.tree).to.equal('bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9');
     expect(evidence.maxLeverage).to.equal(1);
     expect(evidence.shortOpeningCollateralPpb).to.equal(1_000_000_001);
     expect(SEQUENCER_TRADING_IMAGE_FLOOR_COMMIT).to.equal('d7b15fd713355866f35fa5ccf971936ea47a4d47');
@@ -46,6 +48,11 @@ describe('og-mainnet sequencer lane evidence', () => {
         blob: '3d25e144fee422d7dc7892d98c369c2f6c9f0cd1',
         sha256: 'd1b4a190021bf0b746dbdb3101213101d950cfc8cf96755f0608d89db2872ccf',
       },
+      {
+        path: `${LANE_DIR}/og-mainnet/lane-binding.json`,
+        blob: '0972b7b56114d9347e54fd8f13f86f77eb9ebf09',
+        sha256: 'e2e385b02d90af3bfa348871c76f67f1688ce4bfeca641a62478a409063b8545',
+      },
     ]);
     expect(byLane['og-mainnet-usdz'].files).to.deep.equal([
       {
@@ -53,37 +60,72 @@ describe('og-mainnet sequencer lane evidence', () => {
         blob: 'e3b5188881d7f00f13f1ba40fec0c65a086c999b',
         sha256: 'b7482a19440e5a452aa107bf16bd5fe61fa1dcc2aeb83cccc56b910ee2d1209e',
       },
+      {
+        path: `${LANE_DIR}/og-mainnet-usdz/lane-binding.json`,
+        blob: 'eb9d3d78bdf6efc5d88ac2e314e90e342caf513b',
+        sha256: 'e48697f21eb8b8606f487fa666d12aff9f5be91babfeba3f471d091bc553f30a',
+      },
     ]);
     expect(byLane['og-mainnet'].runtimeConfigPath).to.equal(`${LANE_DIR}/og-mainnet/trading.toml`);
     expect(byLane['og-mainnet-usdz'].runtimeConfigPath).to.equal(`${LANE_DIR}/og-mainnet-usdz/trading.toml`);
+    expect(byLane['og-mainnet'].laneBindingPath).to.equal(`${LANE_DIR}/og-mainnet/lane-binding.json`);
+    expect(byLane['og-mainnet-usdz'].laneBindingPath).to.equal(`${LANE_DIR}/og-mainnet-usdz/lane-binding.json`);
     expect(byLane['og-mainnet'].environment).to.deep.equal({
       bondPerpsEnv: 'prod',
       quoteDomain: 'USDCE',
       separateQuoteBooksEnabled: false,
-      database: null,
+      database: {
+        name: 'bond_perpdex_prod_og_mainnet_trading',
+        iamUser: 'bond-perpdex-prod-og-trd%40g-bond.iam',
+        url: 'postgresql://bond-perpdex-prod-og-trd%40g-bond.iam@127.0.0.1:5432/bond_perpdex_prod_og_mainnet_trading?sslmode=disable',
+      },
     });
     expect(byLane['og-mainnet-usdz'].environment).to.deep.equal({
       bondPerpsEnv: 'prod',
       quoteDomain: 'USDZ',
       separateQuoteBooksEnabled: true,
-      database: null,
+      database: {
+        name: 'bond_perpdex_prod_og_mainnet_usdz_trading',
+        iamUser: 'bond-perpdex-prod-og-usdz-trd%40g-bond.iam',
+        url: 'postgresql://bond-perpdex-prod-og-usdz-trd%40g-bond.iam@127.0.0.1:5432/bond_perpdex_prod_og_mainnet_usdz_trading?sslmode=disable',
+      },
     });
   });
 
-  it('keeps mainnet blocked: Trading digest and lane databases are unresolved, never invented', () => {
+  it('binds both lanes to the protected-main Trading image built from f1604545', () => {
     for (const lane of OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE.lanes) {
       expect(lane.tradingArtifact).to.deep.equal({
-        repository: SEQUENCER_TRADING_IMAGE_REPOSITORY,
-        digest: null,
-        sourceCommit: null,
-        sourceTree: null,
-        publicationRunId: null,
+        repository: 'us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/trading',
+        digest: 'sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4',
+        sourceCommit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
+        sourceTree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
+        publicationRunId: '42942405427',
       });
+      expect(lane.tradingArtifact.repository).to.equal(SEQUENCER_TRADING_IMAGE_REPOSITORY);
     }
+    // The tracked profiles pass the static gate with no fixture overrides.
+    for (const profile of [mainnet, usdz]) {
+      expect(gate(profile)).not.to.throw();
+    }
+  });
+
+  it('still fails closed by name when any lane field is reset to unresolved', () => {
+    const blank = {
+      repository: SEQUENCER_TRADING_IMAGE_REPOSITORY,
+      digest: null,
+      sourceCommit: null,
+      sourceTree: null,
+      publicationRunId: null,
+    };
+    const lanes = RESOLVED_LANES.map((lane) => ({
+      ...lane,
+      environment: { ...lane.environment, database: null },
+      tradingArtifact: blank,
+    }));
     for (const profile of [mainnet, usdz]) {
       let message = '';
       try {
-        assertSequencerLeverageEvidence(profile);
+        assertSequencerLeverageEvidence(withSequencerEvidence(profile, { lanes }));
       } catch (error) {
         message = (error as Error).message;
       }
@@ -149,6 +191,40 @@ describe('og-mainnet sequencer lane evidence', () => {
     ).to.throw('runtime config is not one of its reviewed files');
   });
 
+  it('binds each lane to its own lane-binding.json beside its runtime config', () => {
+    const [usdcLane, usdzLane] = RESOLVED_LANES;
+    const binding = (deployment: string, patch: Partial<SequencerLaneEvidence>) =>
+      withLane(mainnet, deployment, (lane) => ({ ...lane, ...patch }));
+    expect(gate(binding('og-mainnet', { laneBindingPath: undefined as unknown as string }))).to.throw(
+      'og-mainnet lane binding is not one of its reviewed files'
+    );
+    expect(gate(binding('og-mainnet', { laneBindingPath: usdcLane.runtimeConfigPath }))).to.throw(
+      'lane binding is not one of its reviewed files'
+    );
+    expect(gate(binding('og-mainnet', { files: [usdcLane.files[0]] }))).to.throw(
+      'og-mainnet lane binding is not one of its reviewed files'
+    );
+    // The other lane's binding, listed as this lane's file.
+    expect(
+      gate(
+        binding('og-mainnet', {
+          files: [usdcLane.files[0], usdzLane.files[1]],
+          laneBindingPath: usdzLane.laneBindingPath,
+        })
+      )
+    ).to.throw('og-mainnet lane binding');
+    // A binding file outside the lane directory.
+    const stray = { ...usdcLane.files[1], path: `${LANE_DIR}/og-mainnet/sub/lane-binding.json` };
+    expect(gate(binding('og-mainnet', { files: [usdcLane.files[0], stray], laneBindingPath: stray.path }))).to.throw(
+      'is not beside its runtime config'
+    );
+    // Both lanes carrying the same binding bytes.
+    const sameBytes = { ...usdzLane.files[1], blob: usdcLane.files[1].blob };
+    expect(gate(binding('og-mainnet-usdz', { files: [usdzLane.files[0], sameBytes] }))).to.throw(
+      'og-mainnet-usdz lane binding is shared with lane og-mainnet'
+    );
+  });
+
   it('binds BOND_PERPS_ENV=prod and the lane quote domain', () => {
     const env = (deployment: string, patch: Partial<SequencerLaneEvidence['environment']>) =>
       withLane(mainnet, deployment, (lane) => ({ ...lane, environment: { ...lane.environment, ...patch } }));
@@ -183,7 +259,7 @@ describe('og-mainnet sequencer lane evidence', () => {
     if (usdcDb === null || own === null) throw new Error('resolved fixture lanes carry databases');
     // Both lanes on one database (and one IAM user).
     expect(gate(db('og-mainnet-usdz', usdcDb))).to.throw(
-      'og-mainnet-usdz database bond_perpdex_prod_fresh_usdce_trading is shared with lane og-mainnet'
+      'og-mainnet-usdz database bond_perpdex_prod_og_mainnet_trading is shared with lane og-mainnet'
     );
     const otherUser = 'bond-perpdex-prod-trd-other%40g-bond.iam';
     const sameUser = {
@@ -270,6 +346,26 @@ environments = [${usdzEnvs}]   # comment
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message);
     return git('rev-parse', 'HEAD');
   };
+  const laneBindingJson = (lane: SequencerLaneEvidence, patch: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      {
+        schema: LANE_BINDING_SCHEMA,
+        status: 'inactive',
+        deployment: lane.deployment,
+        environment: lane.environment,
+        workloadEnv: {
+          BOND_PERPS_ENV: lane.environment.bondPerpsEnv,
+          PERPDEX_QUOTE_DOMAIN: lane.environment.quoteDomain,
+          PERPDEX_SEPARATE_QUOTE_BOOKS_ENABLED: String(lane.environment.separateQuoteBooksEnabled),
+          DATABASE_URL: lane.environment.database?.url,
+        },
+        runtimeConfig: lane.runtimeConfigPath,
+        tradingImage: null,
+        ...patch,
+      },
+      null,
+      2
+    ) + '\n';
   let floor: string;
   let config: string;
   let prodAdmits: string;
@@ -283,6 +379,7 @@ environments = [${usdzEnvs}]   # comment
     floor = commit('floor');
     write(`${LANE_DIR}/og-mainnet/trading.toml`, '# og-mainnet (USDC.e)\nmax_leverage = 1\n');
     write(`${LANE_DIR}/og-mainnet-usdz/trading.toml`, '# og-mainnet-usdz (USDZ)\nmax_leverage = 1\n');
+    for (const lane of RESOLVED_LANES) write(lane.laneBindingPath, laneBindingJson(lane));
     config = commit('lanes');
     write('core/types/quote-domains.toml', quoteDomains('"local", "development", "staging", "prod"'));
     write('core/types/src/quote_domain.rs', quoteDomainRs('LOCAL_ENVIRONMENT, "development", "staging", "prod"'));
@@ -312,7 +409,7 @@ environments = [${usdzEnvs}]   # comment
       lanes: RESOLVED_LANES.map((lane) =>
         tamper({
           ...lane,
-          files: [fileEvidence(lane.runtimeConfigPath)],
+          files: [fileEvidence(lane.runtimeConfigPath), fileEvidence(lane.laneBindingPath)],
           tradingArtifact: {
             ...lane.tradingArtifact,
             sourceCommit,
@@ -373,6 +470,64 @@ environments = [${usdzEnvs}]   # comment
       tree: '0'.repeat(40),
     });
     expect(failed(wrongTree)[0]).to.match(/^\* config commit tree/);
+  });
+
+  it('replays each lane-binding.json against the lane deployment, env, database and runtime config', () => {
+    const [usdcLane, usdzLane] = RESOLVED_LANES;
+    expect(laneBindingRefusals(laneBindingJson(usdcLane), usdcLane)).to.deep.equal([]);
+    expect(laneBindingRefusals(laneBindingJson(usdzLane), usdzLane)).to.deep.equal([]);
+    // Swapped bindings: each names the other lane.
+    expect(laneBindingRefusals(laneBindingJson(usdzLane), usdcLane).join('; ')).to.match(
+      /^deployment "og-mainnet-usdz" != "og-mainnet"; runtimeConfig .*; environment .*; workloadEnv /
+    );
+    const wrongDb = { ...usdcLane.environment, database: usdzLane.environment.database };
+    expect(laneBindingRefusals(laneBindingJson(usdcLane, { environment: wrongDb }), usdcLane)[0]).to.match(
+      /^environment .*bond_perpdex_prod_og_mainnet_usdz_trading/
+    );
+    const env = { BOND_PERPS_ENV: 'staging' };
+    expect(laneBindingRefusals(laneBindingJson(usdcLane, { workloadEnv: env }), usdcLane)[0]).to.match(/^workloadEnv /);
+    expect(laneBindingRefusals(laneBindingJson(usdcLane, { schema: 'v1' }), usdcLane)[0]).to.match(/^schema /);
+    expect(
+      laneBindingRefusals(laneBindingJson(usdcLane, { tradingImage: { digest: 'sha256:' + 'b'.repeat(64) } }), usdcLane)
+    ).to.deep.equal([
+      `tradingImage {"digest":"sha256:${'b'.repeat(64)}"} does not name ${usdcLane.tradingArtifact.digest}`,
+    ]);
+    const named = { digest: usdcLane.tradingArtifact.digest };
+    expect(laneBindingRefusals(laneBindingJson(usdcLane, { tradingImage: named }), usdcLane)).to.deep.equal([]);
+    expect(laneBindingRefusals('not json', usdcLane)).to.deep.equal(['lane binding is not JSON']);
+  });
+
+  it('refuses a lane whose committed binding names another lane or is missing', () => {
+    const [usdcLane, usdzLane] = RESOLVED_LANES;
+    write(usdcLane.laneBindingPath, laneBindingJson(usdzLane));
+    const swapped = commit('swap og-mainnet binding');
+    // File evidence pins the bytes at `filesAt`; the verifier reads the binding at `at`.
+    const pinned = (at: string, filesAt = at) =>
+      withSequencerEvidence(mainnet, {
+        commit: at,
+        tree: git('rev-parse', `${at}^{tree}`),
+        lanes: RESOLVED_LANES.map((lane) => ({
+          ...lane,
+          files: [lane.runtimeConfigPath, lane.laneBindingPath].map((file) => {
+            const bytes = execFileSync('git', ['-C', checkout, 'show', `${filesAt}:${file}`]);
+            return {
+              path: file,
+              blob: git('rev-parse', `${filesAt}:${file}`),
+              sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+            };
+          }),
+          tradingArtifact: { ...lane.tradingArtifact, sourceCommit: at, sourceTree: git('rev-parse', `${at}^{tree}`) },
+        })),
+      });
+    // HEAD carries the earlier registry-only commit, so filter to binding findings.
+    const bad = failed(pinned(swapped)).filter((finding) => finding.includes(' lane binding '));
+    expect(bad).to.have.length(1);
+    expect(bad[0]).to.match(/^og-mainnet lane binding .*: deployment "og-mainnet-usdz" != "og-mainnet"/);
+    git('rm', '-q', usdcLane.laneBindingPath);
+    const missing = commit('drop og-mainnet binding');
+    expect(failed(pinned(missing, swapped))).to.include.members([
+      `og-mainnet lane binding ${usdcLane.laneBindingPath}: missing at config commit`,
+    ]);
   });
 
   it('parses the quote-domain registry and allowlist fail-closed', () => {

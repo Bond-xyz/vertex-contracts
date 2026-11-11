@@ -28,6 +28,10 @@ export type SequencerLaneEvidence = {
   files: readonly GitFileEvidence[];
   // The one file the Trading writer mounts as its config; must be listed in files.
   runtimeConfigPath: string;
+  // The lane's reviewed workload binding (bond-perpdex fresh-mainnet-lane-binding/v2):
+  // deployment, environment and DATABASE_URL. Must be listed in files; the verifier
+  // replays its contents against `environment` and `runtimeConfigPath`.
+  laneBindingPath: string;
   environment: {
     // BOND_PERPS_ENV of the lane's Trading writer.
     bondPerpsEnv: string;
@@ -438,25 +442,26 @@ export const SEQUENCER_TRADING_IMAGE_REPOSITORY = 'us-central1-docker.pkg.dev/g-
 // contract_initial_health refuses, so no fresh launch lane may reuse its database.
 export const SEQUENCER_RESERVED_TRADING_DATABASES: readonly string[] = ['bond_perpdex_prod_trading'];
 
-// Reviewed fresh-lane runtime configs: Bond-xyz/bond-perpdex PR #2973, merged at
-// 90c79ef4 on main (fast-forward over #2972 d7b15fd7). Blob = git object id at
-// that commit; sha256 = SHA-256 of those exact bytes.
+// Reviewed fresh-lane files on Bond-xyz/bond-perpdex main at f1604545 (PR #2977,
+// lane-binding.json). trading.toml is unchanged since PR #2973 (90c79ef4): same blobs.
+// Blob = git object id at that commit; sha256 = SHA-256 of those exact bytes.
+// f1604545 descends from the d7b15fd7 floor and from c0de735a (USDZ admitted in prod
+// behind the separate-books switch).
 const FRESH_MAINNET_LANE_SOURCE = {
   repository: 'Bond-xyz/bond-perpdex',
-  commit: '90c79ef49455d93ebdbee2cc506c7f016f3b1d7d',
-  tree: '0b9c5337fb38b15fb008b9b250b8d3ec637fc374',
+  commit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
+  tree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
 } as const;
 
-// Trading image identity is unresolved for both lanes: the main publications of
-// d7b15fd7 (Actions run 42918106753) and 90c79ef4 (run 42923778881) failed before
-// any image build, and a production digest needs an observed staging rollout.
-// Fresh-lane databases have no reviewed DATABASE_URL yet. Both stay null (fail closed).
-const UNRESOLVED_TRADING_ARTIFACT: SequencerLaneEvidence['tradingArtifact'] = {
+// One Trading image serves both lanes; the lane is chosen by its workload env and
+// runtime config, not the image. Built by protected main publication of f1604545:
+// bond-perpdex Actions run 42942405427 (Cloud Build 54b23c18-04a1-400a-9dc2-411b756c498d).
+const FRESH_MAINNET_TRADING_ARTIFACT: SequencerLaneEvidence['tradingArtifact'] = {
   repository: SEQUENCER_TRADING_IMAGE_REPOSITORY,
-  digest: null,
-  sourceCommit: null,
-  sourceTree: null,
-  publicationRunId: null,
+  digest: 'sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4',
+  sourceCommit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
+  sourceTree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
+  publicationRunId: '42942405427',
 };
 
 export const OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE: NonNullable<
@@ -477,15 +482,25 @@ export const OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE: NonNullable<
           blob: '3d25e144fee422d7dc7892d98c369c2f6c9f0cd1',
           sha256: 'd1b4a190021bf0b746dbdb3101213101d950cfc8cf96755f0608d89db2872ccf',
         },
+        {
+          path: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet/lane-binding.json',
+          blob: '0972b7b56114d9347e54fd8f13f86f77eb9ebf09',
+          sha256: 'e2e385b02d90af3bfa348871c76f67f1688ce4bfeca641a62478a409063b8545',
+        },
       ],
       runtimeConfigPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet/trading.toml',
+      laneBindingPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet/lane-binding.json',
       environment: {
         bondPerpsEnv: 'prod',
         quoteDomain: 'USDCE',
         separateQuoteBooksEnabled: false,
-        database: null,
+        database: {
+          name: 'bond_perpdex_prod_og_mainnet_trading',
+          iamUser: 'bond-perpdex-prod-og-trd%40g-bond.iam',
+          url: 'postgresql://bond-perpdex-prod-og-trd%40g-bond.iam@127.0.0.1:5432/bond_perpdex_prod_og_mainnet_trading?sslmode=disable',
+        },
       },
-      tradingArtifact: UNRESOLVED_TRADING_ARTIFACT,
+      tradingArtifact: FRESH_MAINNET_TRADING_ARTIFACT,
     },
     {
       deployment: 'og-mainnet-usdz',
@@ -495,17 +510,26 @@ export const OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE: NonNullable<
           blob: 'e3b5188881d7f00f13f1ba40fec0c65a086c999b',
           sha256: 'b7482a19440e5a452aa107bf16bd5fe61fa1dcc2aeb83cccc56b910ee2d1209e',
         },
+        {
+          path: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet-usdz/lane-binding.json',
+          blob: 'eb9d3d78bdf6efc5d88ac2e314e90e342caf513b',
+          sha256: 'e48697f21eb8b8606f487fa666d12aff9f5be91babfeba3f471d091bc553f30a',
+        },
       ],
       runtimeConfigPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet-usdz/trading.toml',
-      // At 90c79ef4 core/types quote-domains.toml lists USDZ for local/development/staging
-      // only, so a Trading image from that source refuses USDZ under BOND_PERPS_ENV=prod.
+      laneBindingPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet-usdz/lane-binding.json',
+      // USDZ under BOND_PERPS_ENV=prod needs separate quote books (core/types at f1604545).
       environment: {
         bondPerpsEnv: 'prod',
         quoteDomain: 'USDZ',
         separateQuoteBooksEnabled: true,
-        database: null,
+        database: {
+          name: 'bond_perpdex_prod_og_mainnet_usdz_trading',
+          iamUser: 'bond-perpdex-prod-og-usdz-trd%40g-bond.iam',
+          url: 'postgresql://bond-perpdex-prod-og-usdz-trd%40g-bond.iam@127.0.0.1:5432/bond_perpdex_prod_og_mainnet_usdz_trading?sslmode=disable',
+        },
       },
-      tradingArtifact: UNRESOLVED_TRADING_ARTIFACT,
+      tradingArtifact: FRESH_MAINNET_TRADING_ARTIFACT,
     },
   ],
 };
@@ -547,7 +571,7 @@ function ogMainnetProfile(input: {
     operators: OG_MAINNET_SHARED.operators,
     releaseReviewer: OG_MAINNET_SHARED.releaseReviewer,
     storkAggregator: OG_MAINNET_SHARED.storkAggregator,
-    // Both lanes' reviewed runtime configs; image and database identity still unresolved.
+    // Both lanes' reviewed runtime configs, lane bindings, databases and Trading image.
     sequencerLeverageEvidence: { required: true, evidence: OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE },
     distinctVerifierQuorumFrom: [input.sibling],
     ids: {

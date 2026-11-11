@@ -120,31 +120,37 @@ Longs are capped at exactly 1x. `shortWeightInitial` is 2.000000001, not 2.0, be
 
 **Short-side epsilon:** the short bound is conservative, not an exact zero. A short with notional equal to its collateral has initial health `-1e-9 × notional`, so it is refused. A short needs collateral of at least `ceil(short notional × 1_000_000_001 / 1_000_000_000)`. Because `OffchainExchange` matching bypasses health, the sequencer's integer `max_leverage = 1` cap alone, which reserves exactly the notional, would let a full 1x short open already unhealthy. Deployment stays blocked until backend exact-order admission adds that short-side ppb buffer (or an equivalent). The gate requires `shortOpeningCollateralPpb ≥ shortWeightInitial − 1e9` in the sequencer evidence. Perp health values a short at the oracle mark, not the fill price, and matching debits fees from quote after the fill. A short of size s filled at price F with oracle mark M needs `Q ≥ shortWeightInitial·M·s − F·s`, which is the ppb reserve on mark notional plus `(M − F)·s`. So the evidence must also declare `shortAdmissionBasis: 'post_fill_initial_health_at_oracle_mark'` and `feesReservedSeparately: true`. A ppb reserve on fill (or mark) notional alone lets a short filled below mark open unhealthy. Longs (weight 0) need only the fill notional plus fees.
 
-**Sequencer cap gate:** `OffchainExchange` matching does not enforce health, so the sequencer's `max_leverage` is what actually enforces 1x. `assertSequencerLeverageEvidence` (first step of `collectGalileoStaticReleasePolicy`) refuses mainnet until every lane (`og-mainnet`, `og-mainnet-usdz`) binds:
+**Sequencer cap gate:** `OffchainExchange` matching does not enforce health, so the sequencer's `max_leverage` is what actually enforces 1x. `assertSequencerLeverageEvidence` (first step of `collectGalileoStaticReleasePolicy`) refuses mainnet unless every lane (`og-mainnet`, `og-mainnet-usdz`) binds:
 
 ```mermaid
 flowchart LR
-  cfg["lane trading.toml<br/>#2973 90c79ef4<br/>blob + sha256"]:::done
-  env["BOND_PERPS_ENV=prod<br/>quote domain USDCE / USDZ"]:::done
-  db["DATABASE_URL<br/>own fresh DB, IAM"]:::open
-  img["Trading digest<br/>source >= d7b15fd7"]:::open
-  usdz["USDZ admitted<br/>under prod"]:::blocked
+  cfg["lane trading.toml<br/>blob + sha256"]:::done
+  bind["lane-binding.json<br/>#2977 f1604545"]:::done
+  env["BOND_PERPS_ENV=prod<br/>USDCE / USDZ"]:::done
+  db["own DB + IAM user<br/>per lane"]:::done
+  img["trading@sha256:914762fd<br/>f1604545, run 42942405427"]:::done
+  usdz["USDZ admitted in prod<br/>c0de735a"]:::done
+  seq["sequencer lane gate"]:::done
+  rel["backend runtime-release<br/>manifest"]:::blocked
   gate["mainnet deploy"]:::blocked
-  cfg --> gate
-  env --> gate
-  db --> gate
-  img --> gate
+  cfg --> seq
+  bind --> seq
+  env --> seq
+  db --> seq
+  img --> seq
   usdz --> img
+  seq --> gate
+  rel --> gate
   classDef done fill:#bbf7d0,stroke:#15803d
-  classDef open fill:#fde68a,stroke:#b45309
   classDef blocked fill:#fecaca,stroke:#b91c1c
 ```
 
-- Config: lane file path inside its own lane dir, exact blob + SHA-256. No shared path or bytes.
+- Config + binding: both files in own lane dir, exact blob + SHA-256 at bond-perpdex `f1604545` (tree `bc5fdc64`). No shared path or bytes.
 - Env: `prod`; quote domain = profile collateral; separate books on only for USDZ.
-- DB: own database + IAM user per lane, passwordless proxy URL. Private-beta `bond_perpdex_prod_trading` refused.
-- Image: `bond-perpdex-services/trading@sha256:…` + source commit/tree + publication run, all or none. Unresolved = gate closed.
-- Replay against a bond-perpdex checkout: `BOND_PERPDEX_CHECKOUT=… yarn verify:og-mainnet:sequencer-lanes` (bytes, floor ancestry, quote-domain admission). At `90c79ef4` USDZ is local/development/staging only, so the USDZ lane needs a Trading source that admits USDZ in `prod`.
+- DB: `bond_perpdex_prod_og_mainnet_trading` / `bond_perpdex_prod_og_mainnet_usdz_trading`, own IAM user each, passwordless proxy URL. Private-beta `bond_perpdex_prod_trading` refused.
+- Image: one shared `bond-perpdex-services/trading@sha256:914762fd…09bd4`, source `f1604545`, run `42942405427`. Digest + source + tree + run bind all or none; any null = gate closed.
+- Replay: `BOND_PERPDEX_CHECKOUT=… yarn verify:og-mainnet:sequencer-lanes` checks bytes, lane-binding contents, floor `d7b15fd7` ancestry, prod quote-domain admission.
+- Still blocked: `collectGalileoStaticReleasePolicy` refuses until the backend runtime-release manifest (`sourceCommit`, `artifactManifestSha256`) is bound.
 
 A mainnet profile that sets `required: false` is refused; only the tracked Galileo testnet may skip the gate.
 
