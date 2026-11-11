@@ -16,6 +16,7 @@ import {
   SEQUENCER_TRADING_IMAGE_REPOSITORY,
   SequencerLaneEvidence,
 } from './deployment-config';
+import { assertBackendRuntimeReleaseBinding } from './og-mainnet-backend-artifact-manifest';
 
 export const BACKEND_PROTOCOL_BASELINE_COMMIT = '1d174da2f130cf6f4f03b29029a002d92acc76f8';
 // Retained only for the existing release-attestation field name. This value is
@@ -781,6 +782,8 @@ export function collectGalileoStaticReleasePolicy(input: { repoRoot?: string } =
       'final immutable backend artifact/source binding is unresolved; release preparation remains blocked'
     );
   }
+  // Mainnet: the binding must be the tracked reviewed manifest's exact bytes and source.
+  assertBackendRuntimeReleaseBinding(tracked.policy, repoRoot);
   const collateral = loadTrackedCollateralProvenance(repoRoot);
   return {
     ...tracked,

@@ -47,6 +47,22 @@ results.storkSpread = storkPolicy.coherence.maxSignedTimestampSpreadSeconds;
 results.storkStatus = storkPolicy.status;
 results.storkDecision = storkPolicy.coherence.decision;
 attempt('staticReleasePolicy', () => stork.collectGalileoStaticReleasePolicy());
+// Tampered runtime binding in a scratch root: the gate refuses before collateral.
+const os = require('os');
+const path = require('path');
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'og-mainnet-runtime-'));
+fs.mkdirSync(path.join(scratch, 'config'));
+for (const file of [PERPDEX_NETWORK.files.collateralProvenance, 'config/og-mainnet.backend-artifact-manifest.json']) {
+  fs.copyFileSync(file, path.join(scratch, file));
+}
+const tampered = JSON.parse(JSON.stringify(storkPolicy));
+tampered.backend.runtimeRelease.artifactManifestSha256 = '0'.repeat(64);
+fs.writeFileSync(path.join(scratch, PERPDEX_NETWORK.files.storkPolicy), JSON.stringify(tampered, null, 2) + String.fromCharCode(10));
+attempt('tamperedRuntimeRelease', () => stork.collectGalileoStaticReleasePolicy({ repoRoot: scratch }));
+fs.rmSync(path.join(scratch, 'config/og-mainnet.backend-artifact-manifest.json'));
+fs.writeFileSync(path.join(scratch, PERPDEX_NETWORK.files.storkPolicy), JSON.stringify(storkPolicy, null, 2) + String.fromCharCode(10));
+attempt('missingManifest', () => stork.collectGalileoStaticReleasePolicy({ repoRoot: scratch }));
+results.releaseStatus = policy.status;
 console.log(JSON.stringify(results));
 `;
 
@@ -78,11 +94,20 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.storkSpread).to.equal(3);
       expect(results.storkStatus).to.equal('approved_for_og_mainnet_release');
       expect(results.storkDecision).to.equal('approve_exact_og_mainnet_cross_feed_timestamp_spread');
-      // Sequencer lane evidence (configs, bindings, databases, Trading image) passes;
-      // the backend runtime-release manifest is now the first release-preparation refusal.
-      expect(results.staticReleasePolicy).to.equal(
-        'final immutable backend artifact/source binding is unresolved; release preparation remains blocked'
+      // Sequencer lanes and the backend runtime-release manifest (f1604545) both pass.
+      // og-mainnet clears static release preparation; USDZ stops only on its
+      // still-unresolved super-app collateral provenance.
+      if (profile === 'og-mainnet') {
+        expect(results.staticReleasePolicy).to.equal('ok');
+      } else {
+        expect(results.staticReleasePolicy).to.include('unresolved operator-fill fields: sources.bondSuperApp.commit');
+      }
+      expect(results.tamperedRuntimeRelease).to.include(
+        'backend runtime artifact manifest SHA-256 does not match the tracked manifest bytes'
       );
+      expect(results.missingManifest).to.include('reviewed backend artifact manifest is missing');
+      // Release activation still waits for Adam's approval and attestation.
+      expect(results.releaseStatus).to.equal('pending_og_mainnet_review');
     });
   }
 });

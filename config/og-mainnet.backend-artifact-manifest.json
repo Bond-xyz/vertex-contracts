@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "kind": "bond-perpdex-og-mainnet-backend-artifact-manifest",
+  "manifestId": "bond-perpdex-og-mainnet-backend-runtime-f1604545",
+  "status": "published_signed_immutable_backend_release",
+  "deployments": [
+    "og-mainnet",
+    "og-mainnet-usdz"
+  ],
+  "source": {
+    "repository": "Bond-xyz/bond-perpdex",
+    "ref": "refs/heads/main",
+    "commit": "f16045451a96ad3ac77299903fdde200b2ac0044",
+    "tree": "bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9"
+  },
+  "target": {
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "publication": {
+    "projectId": "g-bond",
+    "location": "us-central1",
+    "cloudBuildId": "54b23c18-04a1-400a-9dc2-411b756c498d",
+    "cloudBuildTriggerId": "3122e39d-b0e1-4e26-bc0d-39f37b496ef3",
+    "buildServiceAccount": "projects/g-bond/serviceAccounts/bond-perpdex-ci-main@g-bond.iam.gserviceaccount.com",
+    "buildRunId": "42940453544",
+    "evidenceRunId": "42942405427",
+    "evidenceArtifact": "development-plan-evidence-1",
+    "receiptSha256": "37f4cf6de621fe92d05ab7a05632dc119ca43602b471cf46a0b3ba0e78d75acf",
+    "payloadSha256": "8c7fcb7a06c7f631e89f58c04a56e0e93f49806e2487ed62e47d0726d79d8dc2",
+    "signingKey": "gcpkms://projects/g-bond/locations/us-central1/keyRings/bond-perpdex-artifact-signing/cryptoKeys/bond-perpdex-artifact-signing-key/versions/1"
+  },
+  "services": {
+    "market-data": {
+      "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/market-data",
+      "digest": "sha256:cee9696489ba9c8af8a9794e0047546b184bb9132eb8fca81383179b31630f8f",
+      "signatureVerificationSha256": "5d64073acc9d871262a09de3dbd1373e92ebb98f5d4040c3fa16371f1ddaceca"
+    },
+    "mm-bot": {
+      "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/mm-bot",
+      "digest": "sha256:8f8b243ecebdde44e84407451054aad3a7966dc5e8cd4aaacf43e6e68ed1d803",
+      "signatureVerificationSha256": "a13ac6fd6e418fb60310023ee0bba404ce80773628c67c58bf1ec4c40e125ea4"
+    },
+    "price-oracle": {
+      "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/price-oracle",
+      "digest": "sha256:15ae4c5d422c22e01ac62c1e35e068d1020abdcfa45a601d4d4d5eaf391222b7",
+      "signatureVerificationSha256": "e190e21b23502dd2c2bb53620053d37159f556a7f030f0579b827599a848619d"
+    },
+    "settlement": {
+      "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/settlement",
+      "digest": "sha256:f1149f646b3cb4ff5a562e218dde70385891dde413eb495126ed10fb08f67efe",
+      "signatureVerificationSha256": "18ce47d3ed978b90daf52c812bba836ffa29a496c8d95b87b3248bede2566def"
+    },
+    "trading": {
+      "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/trading",
+      "digest": "sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4",
+      "signatureVerificationSha256": "fffbc453f728ded4d70e4a3a135707a409dbb8750c305fd622c975bed5ccde27"
+    }
+  }
+}
