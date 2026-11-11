@@ -6,8 +6,8 @@ import {
 
 export type SequencerEvidence = NonNullable<PerpdexNetworkProfile['sequencerLeverageEvidence']['evidence']>;
 
-// The tracked evidence is fully resolved (bond-perpdex f1604545, Trading image from
-// publication run 42942405427); negative tests mutate copies of it.
+// The tracked evidence is fully resolved (bond-perpdex a99eb379, Trading image from
+// publication evidence run 42977356043); negative tests mutate copies of it.
 export const RESOLVED_LANES: readonly SequencerLaneEvidence[] = OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE.lanes;
 
 export function withSequencerEvidence(

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "bond-perpdex-og-mainnet-backend-artifact-manifest",
-  "manifestId": "bond-perpdex-og-mainnet-backend-runtime-f1604545",
+  "manifestId": "bond-perpdex-og-mainnet-backend-runtime-a99eb379",
   "status": "published_signed_immutable_backend_release",
   "deployments": [
     "og-mainnet",
@@ -10,8 +10,8 @@
   "source": {
     "repository": "Bond-xyz/bond-perpdex",
     "ref": "refs/heads/main",
-    "commit": "f16045451a96ad3ac77299903fdde200b2ac0044",
-    "tree": "bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9"
+    "commit": "a99eb3795f92d3f6f8810ee6e12541b59e133be0",
+    "tree": "6367ef2b1ef102c202b59c69721ee779b0ae187b"
   },
   "target": {
     "os": "linux",
@@ -20,41 +20,41 @@
   "publication": {
     "projectId": "g-bond",
     "location": "us-central1",
-    "cloudBuildId": "54b23c18-04a1-400a-9dc2-411b756c498d",
+    "cloudBuildId": "3e8f200f-1413-4aad-b39f-92b6f802d33e",
     "cloudBuildTriggerId": "3122e39d-b0e1-4e26-bc0d-39f37b496ef3",
     "buildServiceAccount": "projects/g-bond/serviceAccounts/bond-perpdex-ci-main@g-bond.iam.gserviceaccount.com",
-    "buildRunId": "42940453544",
-    "evidenceRunId": "42942405427",
+    "buildRunId": "42975522219",
+    "evidenceRunId": "42977356043",
     "evidenceArtifact": "development-plan-evidence-1",
-    "receiptSha256": "37f4cf6de621fe92d05ab7a05632dc119ca43602b471cf46a0b3ba0e78d75acf",
-    "payloadSha256": "8c7fcb7a06c7f631e89f58c04a56e0e93f49806e2487ed62e47d0726d79d8dc2",
+    "receiptSha256": "95961c7f8163f11cd897d36e0c59b0ba2a278abc475650a3b1a293663bb56bb4",
+    "payloadSha256": "a4128c00bde39360e971a902dfa8210a988b198a0167bcf71a185b18d255cf9c",
     "signingKey": "gcpkms://projects/g-bond/locations/us-central1/keyRings/bond-perpdex-artifact-signing/cryptoKeys/bond-perpdex-artifact-signing-key/versions/1"
   },
   "services": {
     "market-data": {
       "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/market-data",
-      "digest": "sha256:cee9696489ba9c8af8a9794e0047546b184bb9132eb8fca81383179b31630f8f",
-      "signatureVerificationSha256": "5d64073acc9d871262a09de3dbd1373e92ebb98f5d4040c3fa16371f1ddaceca"
+      "digest": "sha256:6f670586ae72a77f1b5fb8622b5367f36a5d7d5ba73681ae7918e59335a80962",
+      "signatureVerificationSha256": "8b4a3b54646e91d06ec162c437065244c29d085cd767130376951f7dfaf87dde"
     },
     "mm-bot": {
       "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/mm-bot",
-      "digest": "sha256:8f8b243ecebdde44e84407451054aad3a7966dc5e8cd4aaacf43e6e68ed1d803",
-      "signatureVerificationSha256": "a13ac6fd6e418fb60310023ee0bba404ce80773628c67c58bf1ec4c40e125ea4"
+      "digest": "sha256:a41fdb5afa556c03d811e86673276eedb47592879d91bfdc103826ff83e5e67f",
+      "signatureVerificationSha256": "738aa3b0836b09fa0cf805b038e15350dc4a170357197cc8afa3d74cad6fa8d9"
     },
     "price-oracle": {
       "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/price-oracle",
-      "digest": "sha256:15ae4c5d422c22e01ac62c1e35e068d1020abdcfa45a601d4d4d5eaf391222b7",
-      "signatureVerificationSha256": "e190e21b23502dd2c2bb53620053d37159f556a7f030f0579b827599a848619d"
+      "digest": "sha256:f0f8a5ba6faa51e2293d51672636d2792949670a647649fff9b9cd8af285ccbc",
+      "signatureVerificationSha256": "9f5258d9045f69792ce0c890a960530d9eaf4441563ae18531300ac17c6e35ef"
     },
     "settlement": {
       "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/settlement",
-      "digest": "sha256:f1149f646b3cb4ff5a562e218dde70385891dde413eb495126ed10fb08f67efe",
-      "signatureVerificationSha256": "18ce47d3ed978b90daf52c812bba836ffa29a496c8d95b87b3248bede2566def"
+      "digest": "sha256:273d9889159eb36db9788694a9e2f425404eaba0b1f933c53858dbcaa50d6dcb",
+      "signatureVerificationSha256": "ff6f4effcff2d52ae518f1470ef14f951b7d707bcf537e057dbfb4de33272092"
     },
     "trading": {
       "repository": "us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/trading",
-      "digest": "sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4",
-      "signatureVerificationSha256": "fffbc453f728ded4d70e4a3a135707a409dbb8750c305fd622c975bed5ccde27"
+      "digest": "sha256:10fa7db34896f94b6470dc618efc17b23340b642dd8734d0702f08f2d91f93cc",
+      "signatureVerificationSha256": "9df11a891e312a8155416c074f9d98d355109ef7daa1ee585e235d933c2b30b4"
     }
   }
 }

@@ -58,7 +58,7 @@ Deploy-time approval flow:
 2. `yarn evidence:galileo` (with `PERPDEX_NETWORK` set) prints the unsigned EIP-712 request.
 3. The request is signed with the deployer key and saved to `config/<profile>.release-attestation.local.json`.
 4. The gate lifts. Steps 3 and 4 happen only after the release policy status is set to `approved_for_og_mainnet_release` in a reviewed commit.
-- The Stork policies are `approved_for_og_mainnet_release` (3 s spread) and bind the reviewed `f1604545` backend artifact manifest.
+- The Stork policies are `approved_for_og_mainnet_release` (3 s spread) and bind the reviewed `a99eb379` backend artifact manifest (stale-ask fix #2978).
 - Products and product reviews are `approved: false` / `pending_red_approval`. The reviews pin the merged contract packet `15287abc32072de7cbe820119682dce73e044eb1` (tree `a9cbb18229e9ce65c23cd413339036fc2b44971c`).
 - Collateral provenance: both resolved, no nulls. USDC.e: super-app `1222b471` registry. USDZ: super-app PR #1123 head `fb482b86` (tree `b1fdefb9`), `registry.ts` blob `3850aa1d`, SHA-256 `10c5b01f…ab44b`; `og-mainnet-prod` `USDZ.domains` all `false`, PerpDex `pending_fresh_deploy` / not enabled (prod's live PerpDex domain is the USDC.e private beta). `loadTrackedCollateralProvenance` refuses any null or mismatch.
 
@@ -127,10 +127,10 @@ flowchart LR
   bind["lane-binding.json<br/>#2977 f1604545"]:::done
   env["BOND_PERPS_ENV=prod<br/>USDCE / USDZ"]:::done
   db["own DB + IAM user<br/>per lane"]:::done
-  img["trading@sha256:914762fd<br/>f1604545, run 42942405427"]:::done
+  img["trading@sha256:10fa7db3<br/>a99eb379, run 42977356043"]:::done
   usdz["USDZ admitted in prod<br/>c0de735a"]:::done
   seq["sequencer lane gate"]:::done
-  rel["backend runtime-release manifest<br/>f1604545, 5 signed images"]:::done
+  rel["backend runtime-release manifest<br/>a99eb379, 5 signed images"]:::done
   usdzprov["USDZ super-app provenance<br/>#1123 fb482b86"]:::done
   rp["release policy<br/>pending Adam attestation"]:::blocked
   gate["mainnet deploy"]:::blocked
@@ -148,13 +148,13 @@ flowchart LR
   classDef blocked fill:#fecaca,stroke:#b91c1c
 ```
 
-- Config + binding: both files in own lane dir, exact blob + SHA-256 at bond-perpdex `f1604545` (tree `bc5fdc64`). No shared path or bytes.
+- Config + binding: both files in own lane dir, exact blob + SHA-256 at bond-perpdex `a99eb379` (tree `6367ef2b`; lane files unchanged from `f1604545`). No shared path or bytes.
 - Env: `prod`; quote domain = profile collateral; separate books on only for USDZ.
 - DB: `bond_perpdex_prod_og_mainnet_trading` / `bond_perpdex_prod_og_mainnet_usdz_trading`, own IAM user each, passwordless proxy URL. Private-beta `bond_perpdex_prod_trading` refused.
-- Image: one shared `bond-perpdex-services/trading@sha256:914762fd…09bd4`, source `f1604545`, run `42942405427`. Digest + source + tree + run bind all or none; any null = gate closed.
+- Image: one shared `bond-perpdex-services/trading@sha256:10fa7db3…f93cc`, source `a99eb379`, run `42977356043`. Digest + source + tree + run bind all or none; any null = gate closed.
 - Replay: `BOND_PERPDEX_CHECKOUT=… yarn verify:og-mainnet:sequencer-lanes` checks bytes, lane-binding contents, floor `d7b15fd7` ancestry, prod quote-domain admission.
-- Backend release: `config/og-mainnet.backend-artifact-manifest.json`, shared by both lanes. Source `f1604545` / `bc5fdc64`, linux/amd64, Cloud Build `54b23c18`, build run `42940453544`, receipt `37f4cf6d`, 5 cosign-verified digests. Each Stork policy binds `artifactManifestSha256` = SHA-256 of those exact bytes; each product review rebinds its Stork policy hash.
-- Replay: `PERPDEX_BACKEND_PUBLICATION_EVIDENCE=<unzipped development-plan-evidence-1 of run 42942405427> yarn verify:og-mainnet:backend-manifest` checks receipt bytes, source, build, every digest and signature verification.
+- Backend release: `config/og-mainnet.backend-artifact-manifest.json`, shared by both lanes. Source `a99eb379` / `6367ef2b`, linux/amd64, Cloud Build `3e8f200f`, build run `42975522219`, receipt `95961c7f`, 5 cosign-verified digests. Each Stork policy binds `artifactManifestSha256` = SHA-256 of those exact bytes; each product review rebinds its Stork policy hash.
+- Replay: `PERPDEX_BACKEND_PUBLICATION_EVIDENCE=<unzipped development-plan-evidence-1 of run 42977356043> yarn verify:og-mainnet:backend-manifest` checks receipt bytes, source, build, every digest and signature verification.
 - Collateral: USDZ super-app provenance bound at PR #1123 head `fb482b86`; both profiles pass `collectGalileoStaticReleasePolicy`.
 - Still blocked: both release policies stay `pending_og_mainnet_review` until Adam approves and attests.
 
@@ -162,7 +162,7 @@ A mainnet profile that sets `required: false` is refused; only the tracked Galil
 
 **Insurance fund:** the deployment config has no insurance setting. `Clearinghouse.insurance` starts at 0 and only changes through owner `depositInsurance`, which this pipeline never calls. Insurance is therefore zero at launch.
 
-**Stork:** Red (Adam) approved a 3-second cross-feed signed-timestamp spread for both deployments. The runtime backend release is bound to the reviewed `f1604545` artifact manifest.
+**Stork:** Red (Adam) approved a 3-second cross-feed signed-timestamp spread for both deployments. The runtime backend release is bound to the reviewed `a99eb379` artifact manifest.
 
 ## Running the two deployments
 

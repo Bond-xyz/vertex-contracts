@@ -28,20 +28,21 @@ export const OG_MAINNET_BACKEND_ARTIFACT_MANIFEST_STATUS = 'published_signed_imm
 export const OG_MAINNET_BACKEND_SERVICES = ['market-data', 'mm-bot', 'price-oracle', 'settlement', 'trading'] as const;
 export const OG_MAINNET_BACKEND_IMAGE_REGISTRY = 'us-central1-docker.pkg.dev/g-bond/bond-perpdex-services';
 
-// Protected main publication of bond-perpdex f1604545. The images were built by
-// Cloud Build 54b23c18 under trigger bond-perpdex-main, dispatched from Actions run
-// 42940453544 (receipt executionTag github-42940453544-1-f16045451a96). The signed
-// receipt and cosign verifications were retrieved by run 42942405427 into its
+// Protected main publication of bond-perpdex a99eb379 (PR #2978 squash: skip
+// unfunded stale makers instead of refusing the taker). The images were built by
+// Cloud Build 3e8f200f under trigger bond-perpdex-main, dispatched from Actions run
+// 42975522219 (receipt executionTag github-42975522219-1-a99eb3795f92). The signed
+// receipt and cosign verifications were retrieved by run 42977356043 into its
 // development-plan-evidence-1 artifact; that run's later delivery-lease refusal is
 // downstream of, and does not affect, the publication.
 export const OG_MAINNET_BACKEND_PUBLICATION = {
   projectId: 'g-bond',
   location: 'us-central1',
-  cloudBuildId: '54b23c18-04a1-400a-9dc2-411b756c498d',
+  cloudBuildId: '3e8f200f-1413-4aad-b39f-92b6f802d33e',
   cloudBuildTriggerId: '3122e39d-b0e1-4e26-bc0d-39f37b496ef3',
   buildServiceAccount: 'projects/g-bond/serviceAccounts/bond-perpdex-ci-main@g-bond.iam.gserviceaccount.com',
-  buildRunId: '42940453544',
-  evidenceRunId: '42942405427',
+  buildRunId: '42975522219',
+  evidenceRunId: '42977356043',
   evidenceArtifact: 'development-plan-evidence-1',
   signingKey:
     'gcpkms://projects/g-bond/locations/us-central1/keyRings/bond-perpdex-artifact-signing/cryptoKeys/bond-perpdex-artifact-signing-key/versions/1',

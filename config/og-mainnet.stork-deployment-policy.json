@@ -8,8 +8,8 @@
     "releaseCommit": "1d174da2f130cf6f4f03b29029a002d92acc76f8",
     "releaseCommitRole": "reviewed_protocol_baseline_only",
     "runtimeRelease": {
-      "sourceCommit": "f16045451a96ad3ac77299903fdde200b2ac0044",
-      "artifactManifestSha256": "801650a9ec9bac2b917c547f362241d2f88b8508764c903446aa237bb7eb2052",
+      "sourceCommit": "a99eb3795f92d3f6f8810ee6e12541b59e133be0",
+      "artifactManifestSha256": "da45d2ac7c992c03c2f6acfc15919d7a09a43eb472575edbf0114a54383c7393",
       "status": "reviewed_immutable_backend_release"
     },
     "storkBehaviorCommit": "6576efbbfaa74a0babe442be1f8aa029912893f2",

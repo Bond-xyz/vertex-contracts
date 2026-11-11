@@ -212,7 +212,7 @@ describe('PerpDex network profiles', () => {
     expect(() => loadProducts(file, { profile: mainnet })).to.throw('risk weights violate audited bounds');
     fs.unlinkSync(file);
     for (const profile of [mainnet, usdz]) {
-      // Tracked lane evidence is resolved (bond-perpdex f1604545).
+      // Tracked lane evidence is resolved (bond-perpdex a99eb379).
       expect(() => assertSequencerLeverageEvidence(profile)).not.to.throw();
       // The pre-lane shape (no evidence at all) still fails closed.
       expect(() =>

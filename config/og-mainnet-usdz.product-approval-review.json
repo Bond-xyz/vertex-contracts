@@ -27,7 +27,7 @@
   "initialPricePolicy": {
     "source": "verified_stork_deployment_snapshot",
     "policyFile": "config/og-mainnet-usdz.stork-deployment-policy.json",
-    "policySha256": "282c5e29ff25d548113a8c31ca9b1b0dc12016d1bbe66122539669eb7ca03a1d",
+    "policySha256": "32ba4e598ae7d62e55960275d053b71f4ea82bddaecd1379749ff4551afc186e",
     "staticPriceAllowed": false,
     "snapshotTracked": false,
     "graphPreparationRequiresSnapshot": false,

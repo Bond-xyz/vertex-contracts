@@ -16,14 +16,14 @@ import {
 import { StorkDeploymentPolicy } from '../scripts/stork-deployment-snapshot';
 
 const root = path.resolve(__dirname, '..');
-const SOURCE_COMMIT = 'f16045451a96ad3ac77299903fdde200b2ac0044';
-const SOURCE_TREE = 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9';
+const SOURCE_COMMIT = 'a99eb3795f92d3f6f8810ee6e12541b59e133be0';
+const SOURCE_TREE = '6367ef2b1ef102c202b59c69721ee779b0ae187b';
 const PUBLISHED_DIGESTS = {
-  'market-data': 'sha256:cee9696489ba9c8af8a9794e0047546b184bb9132eb8fca81383179b31630f8f',
-  'mm-bot': 'sha256:8f8b243ecebdde44e84407451054aad3a7966dc5e8cd4aaacf43e6e68ed1d803',
-  'price-oracle': 'sha256:15ae4c5d422c22e01ac62c1e35e068d1020abdcfa45a601d4d4d5eaf391222b7',
-  settlement: 'sha256:f1149f646b3cb4ff5a562e218dde70385891dde413eb495126ed10fb08f67efe',
-  trading: 'sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4',
+  'market-data': 'sha256:6f670586ae72a77f1b5fb8622b5367f36a5d7d5ba73681ae7918e59335a80962',
+  'mm-bot': 'sha256:a41fdb5afa556c03d811e86673276eedb47592879d91bfdc103826ff83e5e67f',
+  'price-oracle': 'sha256:f0f8a5ba6faa51e2293d51672636d2792949670a647649fff9b9cd8af285ccbc',
+  settlement: 'sha256:273d9889159eb36db9788694a9e2f425404eaba0b1f933c53858dbcaa50d6dcb',
+  trading: 'sha256:10fa7db34896f94b6470dc618efc17b23340b642dd8734d0702f08f2d91f93cc',
 };
 const mainnet = resolveNetworkProfile('og-mainnet');
 const usdz = resolveNetworkProfile('og-mainnet-usdz');
@@ -110,7 +110,7 @@ function publicationEvidence(edit: (receipt: any, verifies: Record<string, any>)
 const failed = (findings: { check: string; ok: boolean }[]) => findings.filter((f) => !f.ok).map((f) => f.check);
 
 describe('og-mainnet backend artifact manifest', () => {
-  it('tracks the exact published f1604545 linux/amd64 release for both lanes', () => {
+  it('tracks the exact published a99eb379 linux/amd64 release for both lanes', () => {
     const { manifest, manifestSha256 } = loadOgMainnetBackendArtifactManifest(root);
     expect(manifest.source).to.deep.equal({
       repository: 'Bond-xyz/bond-perpdex',
@@ -120,11 +120,11 @@ describe('og-mainnet backend artifact manifest', () => {
     });
     expect(manifest.target).to.deep.equal({ os: 'linux', arch: 'amd64' });
     expect(manifest.deployments).to.deep.equal(['og-mainnet', 'og-mainnet-usdz']);
-    expect(manifest.publication.cloudBuildId).to.equal('54b23c18-04a1-400a-9dc2-411b756c498d');
-    expect(manifest.publication.buildRunId).to.equal('42940453544');
-    expect(manifest.publication.evidenceRunId).to.equal('42942405427');
+    expect(manifest.publication.cloudBuildId).to.equal('3e8f200f-1413-4aad-b39f-92b6f802d33e');
+    expect(manifest.publication.buildRunId).to.equal('42975522219');
+    expect(manifest.publication.evidenceRunId).to.equal('42977356043');
     expect(manifest.publication.receiptSha256).to.equal(
-      '37f4cf6de621fe92d05ab7a05632dc119ca43602b471cf46a0b3ba0e78d75acf'
+      '95961c7f8163f11cd897d36e0c59b0ba2a278abc475650a3b1a293663bb56bb4'
     );
     for (const service of OG_MAINNET_BACKEND_SERVICES) {
       expect(manifest.services[service].digest).to.equal(PUBLISHED_DIGESTS[service]);
@@ -134,7 +134,7 @@ describe('og-mainnet backend artifact manifest', () => {
     );
   });
 
-  it('binds both mainnet profiles to the manifest bytes and f1604545', () => {
+  it('binds both mainnet profiles to the manifest bytes and a99eb379', () => {
     const manifestSha256 = sha256(fs.readFileSync(path.join(root, OG_MAINNET_BACKEND_ARTIFACT_MANIFEST_FILE)));
     for (const profile of [mainnet, usdz]) {
       const policy = storkPolicy(profile.name);
@@ -226,7 +226,7 @@ describe('og-mainnet backend artifact manifest', () => {
         [(m) => (m.status = 'approved_for_og_mainnet_release'), 'published signed og-mainnet backend release'],
         [(m) => (m.deployments = ['og-mainnet']), 'must serve exactly'],
         [(m) => (m.publication.cloudBuildId = '00000000-0000-0000-0000-000000000000'), 'publication cloudBuildId'],
-        [(m) => (m.publication.buildRunId = '42942405427'), 'publication buildRunId'],
+        [(m) => (m.publication.buildRunId = '42977356043'), 'publication buildRunId'],
         [(m) => (m.publication.receiptSha256 = 'ABC'), 'receiptSha256 must be a lowercase SHA-256'],
         [(m) => delete m.services['mm-bot'], 'services must contain exactly'],
         [(m) => (m.services.settlement.digest = m.services.trading.digest), 'digest is reused'],
@@ -251,7 +251,7 @@ describe('og-mainnet backend artifact manifest', () => {
     it('rejects evidence for a different receipt, source, build, digest or signature', () => {
       const cases: [(receipt: any, verifies: Record<string, any>) => void, string][] = [
         [(r) => (r.source.sha = '90c79ef4' + SOURCE_COMMIT.slice(8)), 'receipt source'],
-        [(r) => (r.build.executionTag = 'github-42942405427-1-f16045451a96'), 'receipt build'],
+        [(r) => (r.build.executionTag = 'github-42977356043-1-a99eb3795f92'), 'receipt build'],
         [(r) => (r.build.buildId = 'other'), 'receipt build'],
         [(r) => (r.publication.state = 'pending'), 'receipt publication finalized'],
         [(r) => r.pendingEvidence.push('sbom'), 'receipt publication finalized'],
@@ -259,7 +259,7 @@ describe('og-mainnet backend artifact manifest', () => {
           (r) =>
             (r.services.trading = {
               digest: `sha256:${'2'.repeat(64)}`,
-              evidenceBuildId: '54b23c18-04a1-400a-9dc2-411b756c498d',
+              evidenceBuildId: '3e8f200f-1413-4aad-b39f-92b6f802d33e',
             }),
           'trading receipt digest',
         ],

@@ -121,7 +121,7 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.storkSpread).to.equal(3);
       expect(results.storkStatus).to.equal('approved_for_og_mainnet_release');
       expect(results.storkDecision).to.equal('approve_exact_og_mainnet_cross_feed_timestamp_spread');
-      // Sequencer lanes, backend runtime-release manifest (f1604545) and collateral
+      // Sequencer lanes, backend runtime-release manifest (a99eb379) and collateral
       // provenance all pass: both profiles clear static release preparation.
       expect(results.staticReleasePolicy).to.equal('ok');
       for (const [field, outcome] of Object.entries(results.superAppTamper)) {

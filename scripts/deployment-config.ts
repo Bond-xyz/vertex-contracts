@@ -442,26 +442,27 @@ export const SEQUENCER_TRADING_IMAGE_REPOSITORY = 'us-central1-docker.pkg.dev/g-
 // contract_initial_health refuses, so no fresh launch lane may reuse its database.
 export const SEQUENCER_RESERVED_TRADING_DATABASES: readonly string[] = ['bond_perpdex_prod_trading'];
 
-// Reviewed fresh-lane files on Bond-xyz/bond-perpdex main at f1604545 (PR #2977,
+// Reviewed fresh-lane files on Bond-xyz/bond-perpdex main, now pinned at a99eb379
+// (PR #2978, orderbook-only; lane files byte-identical to f1604545 / PR #2977
 // lane-binding.json). trading.toml is unchanged since PR #2973 (90c79ef4): same blobs.
 // Blob = git object id at that commit; sha256 = SHA-256 of those exact bytes.
-// f1604545 descends from the d7b15fd7 floor and from c0de735a (USDZ admitted in prod
+// a99eb379 descends from f1604545, the d7b15fd7 floor and from c0de735a (USDZ admitted in prod
 // behind the separate-books switch).
 const FRESH_MAINNET_LANE_SOURCE = {
   repository: 'Bond-xyz/bond-perpdex',
-  commit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
-  tree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
+  commit: 'a99eb3795f92d3f6f8810ee6e12541b59e133be0',
+  tree: '6367ef2b1ef102c202b59c69721ee779b0ae187b',
 } as const;
 
 // One Trading image serves both lanes; the lane is chosen by its workload env and
-// runtime config, not the image. Built by protected main publication of f1604545:
-// bond-perpdex Actions run 42942405427 (Cloud Build 54b23c18-04a1-400a-9dc2-411b756c498d).
+// runtime config, not the image. Built by protected main publication of a99eb379:
+// bond-perpdex Actions run 42975522219, evidence run 42977356043 (Cloud Build 3e8f200f-1413-4aad-b39f-92b6f802d33e).
 const FRESH_MAINNET_TRADING_ARTIFACT: SequencerLaneEvidence['tradingArtifact'] = {
   repository: SEQUENCER_TRADING_IMAGE_REPOSITORY,
-  digest: 'sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4',
-  sourceCommit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
-  sourceTree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
-  publicationRunId: '42942405427',
+  digest: 'sha256:10fa7db34896f94b6470dc618efc17b23340b642dd8734d0702f08f2d91f93cc',
+  sourceCommit: 'a99eb3795f92d3f6f8810ee6e12541b59e133be0',
+  sourceTree: '6367ef2b1ef102c202b59c69721ee779b0ae187b',
+  publicationRunId: '42977356043',
 };
 
 export const OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE: NonNullable<
@@ -518,7 +519,7 @@ export const OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE: NonNullable<
       ],
       runtimeConfigPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet-usdz/trading.toml',
       laneBindingPath: 'deploy/candidates/production/fresh-mainnet-launch/og-mainnet-usdz/lane-binding.json',
-      // USDZ under BOND_PERPS_ENV=prod needs separate quote books (core/types at f1604545).
+      // USDZ under BOND_PERPS_ENV=prod needs separate quote books (core/types at a99eb379).
       environment: {
         bondPerpsEnv: 'prod',
         quoteDomain: 'USDZ',

@@ -29,15 +29,15 @@ const LANE_DIR = 'deploy/candidates/production/fresh-mainnet-launch';
 const gate = (profile: PerpdexNetworkProfile) => () => assertSequencerLeverageEvidence(profile);
 
 describe('og-mainnet sequencer lane evidence', () => {
-  it('pins both lanes to bond-perpdex f1604545 (#2973 configs, #2977 bindings) with exact blob and SHA-256', () => {
+  it('pins both lanes to bond-perpdex a99eb379 (#2973 configs, #2977 bindings) with exact blob and SHA-256', () => {
     for (const profile of [mainnet, usdz]) {
       expect(profile.sequencerLeverageEvidence.required).to.equal(true);
       expect(profile.sequencerLeverageEvidence.evidence).to.equal(OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE);
     }
     const evidence = OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE;
     expect(evidence.repository).to.equal('Bond-xyz/bond-perpdex');
-    expect(evidence.commit).to.equal('f16045451a96ad3ac77299903fdde200b2ac0044');
-    expect(evidence.tree).to.equal('bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9');
+    expect(evidence.commit).to.equal('a99eb3795f92d3f6f8810ee6e12541b59e133be0');
+    expect(evidence.tree).to.equal('6367ef2b1ef102c202b59c69721ee779b0ae187b');
     expect(evidence.maxLeverage).to.equal(1);
     expect(evidence.shortOpeningCollateralPpb).to.equal(1_000_000_001);
     expect(SEQUENCER_TRADING_IMAGE_FLOOR_COMMIT).to.equal('d7b15fd713355866f35fa5ccf971936ea47a4d47');
@@ -92,14 +92,14 @@ describe('og-mainnet sequencer lane evidence', () => {
     });
   });
 
-  it('binds both lanes to the protected-main Trading image built from f1604545', () => {
+  it('binds both lanes to the protected-main Trading image built from a99eb379', () => {
     for (const lane of OG_MAINNET_SEQUENCER_LEVERAGE_EVIDENCE.lanes) {
       expect(lane.tradingArtifact).to.deep.equal({
         repository: 'us-central1-docker.pkg.dev/g-bond/bond-perpdex-services/trading',
-        digest: 'sha256:914762fd8d5868dbea330716bdc2a398812c5a18e8a820beddd0b00508c09bd4',
-        sourceCommit: 'f16045451a96ad3ac77299903fdde200b2ac0044',
-        sourceTree: 'bc5fdc649e3e31c3f280d3b0b53d1f318dc346d9',
-        publicationRunId: '42942405427',
+        digest: 'sha256:10fa7db34896f94b6470dc618efc17b23340b642dd8734d0702f08f2d91f93cc',
+        sourceCommit: 'a99eb3795f92d3f6f8810ee6e12541b59e133be0',
+        sourceTree: '6367ef2b1ef102c202b59c69721ee779b0ae187b',
+        publicationRunId: '42977356043',
       });
       expect(lane.tradingArtifact.repository).to.equal(SEQUENCER_TRADING_IMAGE_REPOSITORY);
     }
