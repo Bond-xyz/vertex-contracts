@@ -34,15 +34,19 @@
     },
     "bondSuperApp": {
       "repository": "Bond-xyz/bond-super-app",
-      "commit": null,
-      "tree": null,
+      "commit": "fb482b8640f67f23b710b87e429230615700808f",
+      "tree": "b1fdefb98dc2e0ac7fd899ca0703494af8b3cd33",
       "file": "packages/config/src/generated/registry.ts",
-      "fileBlob": null,
-      "fileSha256": null,
+      "fileBlob": "3850aa1d7efeb3a72e7928c4bdec7bd6cc02b418",
+      "fileSha256": "10c5b01f4e7e4b9049095ad9a07119e328ee21763e5f7f5811ae157cbf0ab44b",
       "assetId": "USDZ",
-      "registryDomains": null,
-      "perpdexLifecycle": null,
-      "perpdexEnabled": null
+      "registryDomains": {
+        "lending": false,
+        "amm": false,
+        "perpdex": false
+      },
+      "perpdexLifecycle": "pending_fresh_deploy",
+      "perpdexEnabled": false
     }
   }
 }

@@ -637,6 +637,21 @@ const OG_MAINNET_SUPER_APP_SOURCE = {
   fileSha256: '281ad15c6437e5cc3a6de1fe548ee929e9ea9eb09f389d845fb398d087994d29',
 };
 
+// USDZ registration: bond-super-app PR #1123 head fb482b86 (merged into testnet via
+// 64efeef4). The 1222b471 registry above predates USDZ, so USDZ binds its own file.
+// og-mainnet-prod assets[USDZ].domains = { lending:false, amm:false, perpdex:false };
+// no og-mainnet-prod perpdex domain carries USDZ collateral (that live domain is the
+// USDCE private-beta lineage), so the fresh USDZ graph is pending and not enabled.
+// Blob = git object id at that commit; fileSha256 = SHA-256 of those exact bytes.
+const OG_MAINNET_USDZ_SUPER_APP_SOURCE = {
+  repository: 'Bond-xyz/bond-super-app',
+  commit: 'fb482b8640f67f23b710b87e429230615700808f',
+  tree: 'b1fdefb98dc2e0ac7fd899ca0703494af8b3cd33',
+  file: 'packages/config/src/generated/registry.ts',
+  fileBlob: '3850aa1d7efeb3a72e7928c4bdec7bd6cc02b418',
+  fileSha256: '10c5b01f4e7e4b9049095ad9a07119e328ee21763e5f7f5811ae157cbf0ab44b',
+};
+
 export const PERPDEX_NETWORK_PROFILES: Readonly<Record<PerpdexNetworkName, PerpdexNetworkProfile>> = {
   galileo: GALILEO_PROFILE,
   'og-mainnet': ogMainnetProfile({
@@ -673,19 +688,12 @@ export const PERPDEX_NETWORK_PROFILES: Readonly<Record<PerpdexNetworkName, Perpd
     marketQuote: 'USDZ',
     lendingEnabled: false,
     ammEnabled: false,
-    // Operator-fill: the generated super-app registry on main predates the USDZ
-    // registration, so no super-app source carries this asset yet.
     bondSuperApp: {
-      repository: 'Bond-xyz/bond-super-app',
-      commit: null,
-      tree: null,
-      file: 'packages/config/src/generated/registry.ts',
-      fileBlob: null,
-      fileSha256: null,
+      ...OG_MAINNET_USDZ_SUPER_APP_SOURCE,
       assetId: 'USDZ',
-      registryDomains: null,
-      perpdexLifecycle: null,
-      perpdexEnabled: null,
+      registryDomains: { lending: false, amm: false, perpdex: false },
+      perpdexLifecycle: 'pending_fresh_deploy',
+      perpdexEnabled: false,
     },
   }),
 };

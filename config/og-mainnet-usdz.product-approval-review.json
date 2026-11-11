@@ -8,7 +8,7 @@
     "symbol": "USDZ",
     "decimals": 6,
     "provenanceFile": "config/og-mainnet-usdz.collateral-provenance.json",
-    "provenanceSha256": "211882f3fab81b1d8c0f3a0af6f29b7b799535e40808e71472f4383b9af1d348",
+    "provenanceSha256": "7250d9a87d2e417919fb2fdaba5d5f23d27061b782df80bb1e5d02d2be334fd0",
     "selectionMode": "static_pinned"
   },
   "contractSource": {

@@ -62,6 +62,35 @@ attempt('tamperedRuntimeRelease', () => stork.collectGalileoStaticReleasePolicy(
 fs.rmSync(path.join(scratch, 'config/og-mainnet.backend-artifact-manifest.json'));
 fs.writeFileSync(path.join(scratch, PERPDEX_NETWORK.files.storkPolicy), JSON.stringify(storkPolicy, null, 2) + String.fromCharCode(10));
 attempt('missingManifest', () => stork.collectGalileoStaticReleasePolicy({ repoRoot: scratch }));
+// Tampered super-app collateral provenance in a scratch root: every field fails closed.
+fs.copyFileSync('config/og-mainnet.backend-artifact-manifest.json', path.join(scratch, 'config/og-mainnet.backend-artifact-manifest.json'));
+const provenance = JSON.parse(fs.readFileSync(PERPDEX_NETWORK.files.collateralProvenance, 'utf8'));
+const superAppTamper = {
+  commit: '0'.repeat(40),
+  tree: '0'.repeat(40),
+  fileBlob: '0'.repeat(40),
+  fileSha256: '0'.repeat(64),
+  registryDomains: { lending: false, amm: false, perpdex: true },
+  perpdexLifecycle: 'live',
+  perpdexEnabled: true,
+  assetId: 'USDT',
+};
+results.superAppTamper = {};
+for (const [field, value] of Object.entries(superAppTamper)) {
+  const forged = JSON.parse(JSON.stringify(provenance));
+  forged.sources.bondSuperApp[field] = value;
+  fs.writeFileSync(path.join(scratch, PERPDEX_NETWORK.files.collateralProvenance), JSON.stringify(forged, null, 2) + String.fromCharCode(10));
+  try { stork.collectGalileoStaticReleasePolicy({ repoRoot: scratch }); results.superAppTamper[field] = 'ok'; } catch (error) { results.superAppTamper[field] = error.message; }
+}
+const nulled = JSON.parse(JSON.stringify(provenance));
+nulled.sources.bondSuperApp.commit = null;
+fs.writeFileSync(path.join(scratch, PERPDEX_NETWORK.files.collateralProvenance), JSON.stringify(nulled, null, 2) + String.fromCharCode(10));
+attempt('superAppNulled', () => stork.collectGalileoStaticReleasePolicy({ repoRoot: scratch }));
+fs.rmSync(scratch, { recursive: true, force: true });
+results.superAppSource = PERPDEX_NETWORK.pins.collateralProvenanceSources.bondSuperApp;
+results.unresolvedPins = stork.unresolvedCollateralProvenancePins();
+const { validateProductApprovalReview } = require('./scripts/validate-galileo-product-review');
+attempt('productReview', () => validateProductApprovalReview());
 results.releaseStatus = policy.status;
 console.log(JSON.stringify(results));
 `;
@@ -70,7 +99,7 @@ describe('0G mainnet profile-selected release gates', function () {
   this.timeout(120000);
 
   for (const profile of ['og-mainnet', 'og-mainnet-usdz']) {
-    it(`${profile}: pins reviewer and operators and stays fail-closed on operator-fill inputs`, () => {
+    it(`${profile}: pins reviewer, operators and collateral provenance; release stays pending`, () => {
       const results = JSON.parse(underProfile(profile, probe));
       expect(results.trackedPolicy).to.equal('ok');
       expect(results.foreignReviewer).to.include('reviewers must be exactly the pinned');
@@ -78,12 +107,10 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.foreignDeployer).to.include('pinned');
       expect(results.foreignSequencer).to.include('pinned');
       expect(results.feePolicy).to.equal('ok');
-      if (profile === 'og-mainnet') {
-        expect(results.provenance).to.equal('ok');
-      } else {
-        // USDZ is still missing from the super-app generated registry.
-        expect(results.provenance).to.include('unresolved operator-fill fields: sources.bondSuperApp.commit');
-      }
+      // Both collaterals statically pin a reviewed super-app registry with no nulls.
+      expect(results.provenance).to.equal('ok');
+      expect(results.unresolvedPins).to.deep.equal([]);
+      expect(results.productReview).to.equal('ok');
       // Stork rotated its aggregator: mainnet accepts only the current key with its
       // pinned bond-perpdex provenance; the previous key is replay-only.
       expect(results.storkPolicy).to.equal('ok');
@@ -94,14 +121,42 @@ describe('0G mainnet profile-selected release gates', function () {
       expect(results.storkSpread).to.equal(3);
       expect(results.storkStatus).to.equal('approved_for_og_mainnet_release');
       expect(results.storkDecision).to.equal('approve_exact_og_mainnet_cross_feed_timestamp_spread');
-      // Sequencer lanes and the backend runtime-release manifest (f1604545) both pass.
-      // og-mainnet clears static release preparation; USDZ stops only on its
-      // still-unresolved super-app collateral provenance.
-      if (profile === 'og-mainnet') {
-        expect(results.staticReleasePolicy).to.equal('ok');
-      } else {
-        expect(results.staticReleasePolicy).to.include('unresolved operator-fill fields: sources.bondSuperApp.commit');
+      // Sequencer lanes, backend runtime-release manifest (f1604545) and collateral
+      // provenance all pass: both profiles clear static release preparation.
+      expect(results.staticReleasePolicy).to.equal('ok');
+      for (const [field, outcome] of Object.entries(results.superAppTamper)) {
+        expect(outcome, field).to.equal('Bond Super App collateral provenance mismatch');
       }
+      expect(Object.keys(results.superAppTamper)).to.have.length(8);
+      expect(results.superAppNulled).to.equal('Bond Super App collateral provenance mismatch');
+      // og-mainnet keeps its 1222b471 USDCE pin; USDZ binds PR #1123 head fb482b86.
+      expect(results.superAppSource).to.deep.equal(
+        profile === 'og-mainnet'
+          ? {
+              repository: 'Bond-xyz/bond-super-app',
+              commit: '1222b4710b2a4a15f1af2bd70a181a220212d287',
+              tree: '2ea4f4ab4e2ba7a6aabd71d69e8f8972ebc6a13d',
+              file: 'packages/config/src/generated/registry.ts',
+              fileBlob: '4624cd8c4904b2994a3e02464342f4aaeb6851de',
+              fileSha256: '281ad15c6437e5cc3a6de1fe548ee929e9ea9eb09f389d845fb398d087994d29',
+              assetId: 'USDCE',
+              registryDomains: { lending: true, amm: true, perpdex: false },
+              perpdexLifecycle: 'pending_fresh_deploy',
+              perpdexEnabled: false,
+            }
+          : {
+              repository: 'Bond-xyz/bond-super-app',
+              commit: 'fb482b8640f67f23b710b87e429230615700808f',
+              tree: 'b1fdefb98dc2e0ac7fd899ca0703494af8b3cd33',
+              file: 'packages/config/src/generated/registry.ts',
+              fileBlob: '3850aa1d7efeb3a72e7928c4bdec7bd6cc02b418',
+              fileSha256: '10c5b01f4e7e4b9049095ad9a07119e328ee21763e5f7f5811ae157cbf0ab44b',
+              assetId: 'USDZ',
+              registryDomains: { lending: false, amm: false, perpdex: false },
+              perpdexLifecycle: 'pending_fresh_deploy',
+              perpdexEnabled: false,
+            }
+      );
       expect(results.tamperedRuntimeRelease).to.include(
         'backend runtime artifact manifest SHA-256 does not match the tracked manifest bytes'
       );

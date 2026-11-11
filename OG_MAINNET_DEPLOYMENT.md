@@ -60,7 +60,7 @@ Deploy-time approval flow:
 4. The gate lifts. Steps 3 and 4 happen only after the release policy status is set to `approved_for_og_mainnet_release` in a reviewed commit.
 - The Stork policies are `approved_for_og_mainnet_release` (3 s spread) and bind the reviewed `f1604545` backend artifact manifest.
 - Products and product reviews are `approved: false` / `pending_red_approval`. The reviews pin the merged contract packet `15287abc32072de7cbe820119682dce73e044eb1` (tree `a9cbb18229e9ce65c23cd413339036fc2b44971c`).
-- Collateral provenance: USDZ `sources.bondSuperApp` is still `null`, because the super-app generated registry has no USDZ entry yet. `loadTrackedCollateralProvenance` refuses while any null remains.
+- Collateral provenance: both resolved, no nulls. USDC.e: super-app `1222b471` registry. USDZ: super-app PR #1123 head `fb482b86` (tree `b1fdefb9`), `registry.ts` blob `3850aa1d`, SHA-256 `10c5b01f…ab44b`; `og-mainnet-prod` `USDZ.domains` all `false`, PerpDex `pending_fresh_deploy` / not enabled (prod's live PerpDex domain is the USDC.e private beta). `loadTrackedCollateralProvenance` refuses any null or mismatch.
 
 ### Carried-field tuple hash (`canonical_json_v1`)
 
@@ -83,7 +83,6 @@ The fee policy (`config/og-mainnet.fee-policy.json`) is approved with bounds min
 | Input | File / pin |
 | --- | --- |
 | Release policy activation + deployer-key-signed attestation after Adam's approval (deploy time) | `config/og-mainnet*.release-policy.json` `status`, `config/<profile>.release-attestation.local.json` |
-| Super-app registry source for USDZ (regenerate the super-app registry first; it predates USDZ) | `config/og-mainnet-usdz.collateral-provenance.json` `sources.bondSuperApp` |
 | Stork cross-feed spread decision and runtime backend release | `config/og-mainnet*.stork-deployment-policy.json` |
 | Red approval of products and product vectors | `config/og-mainnet*.products.json`, `*.product-approval-review.json` |
 
@@ -132,7 +131,7 @@ flowchart LR
   usdz["USDZ admitted in prod<br/>c0de735a"]:::done
   seq["sequencer lane gate"]:::done
   rel["backend runtime-release manifest<br/>f1604545, 5 signed images"]:::done
-  usdzprov["USDZ super-app<br/>collateral provenance"]:::blocked
+  usdzprov["USDZ super-app provenance<br/>#1123 fb482b86"]:::done
   rp["release policy<br/>pending Adam attestation"]:::blocked
   gate["mainnet deploy"]:::blocked
   cfg --> seq
@@ -156,7 +155,8 @@ flowchart LR
 - Replay: `BOND_PERPDEX_CHECKOUT=… yarn verify:og-mainnet:sequencer-lanes` checks bytes, lane-binding contents, floor `d7b15fd7` ancestry, prod quote-domain admission.
 - Backend release: `config/og-mainnet.backend-artifact-manifest.json`, shared by both lanes. Source `f1604545` / `bc5fdc64`, linux/amd64, Cloud Build `54b23c18`, build run `42940453544`, receipt `37f4cf6d`, 5 cosign-verified digests. Each Stork policy binds `artifactManifestSha256` = SHA-256 of those exact bytes; each product review rebinds its Stork policy hash.
 - Replay: `PERPDEX_BACKEND_PUBLICATION_EVIDENCE=<unzipped development-plan-evidence-1 of run 42942405427> yarn verify:og-mainnet:backend-manifest` checks receipt bytes, source, build, every digest and signature verification.
-- Still blocked: og-mainnet-usdz collateral provenance (super-app registry has no USDZ yet); both release policies stay `pending_og_mainnet_review` until Adam approves and attests.
+- Collateral: USDZ super-app provenance bound at PR #1123 head `fb482b86`; both profiles pass `collectGalileoStaticReleasePolicy`.
+- Still blocked: both release policies stay `pending_og_mainnet_review` until Adam approves and attests.
 
 A mainnet profile that sets `required: false` is refused; only the tracked Galileo testnet may skip the gate.
 
